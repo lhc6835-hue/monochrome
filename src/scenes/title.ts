@@ -77,8 +77,20 @@ export class TitleScene implements Scene {
     this.refresh();
   }
 
+  private confirmArmed = false;
+  /** 처음부터: 한 번 더 눌러야 저장이 지워진다 (브라우저 대화상자 대신) */
   private confirmNew() {
-    if (confirm('저장된 진행 상황이 지워집니다. 처음부터 시작할까요?')) this.start(false);
+    if (this.confirmArmed) {
+      this.start(false);
+      return;
+    }
+    this.confirmArmed = true;
+    const btn = this.menu?.querySelectorAll(':scope > button')[this.sel] as HTMLButtonElement | undefined;
+    if (btn) btn.textContent = '저장이 지워집니다 · 한 번 더 누르기';
+    setTimeout(() => {
+      this.confirmArmed = false;
+      if (btn) btn.textContent = '처음부터';
+    }, 3000);
   }
 
   private openSettings() {

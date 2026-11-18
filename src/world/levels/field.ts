@@ -375,10 +375,21 @@ function* giveLast(g: GameAPI): Co {
 // 그리기
 // ------------------------------------------------------------------
 function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1: number; y0: number; y1: number }) {
-  // 지나온 하얀 땅
+  // 지나온 하얀 땅 (진엔딩에서 여백이 꽃잎으로 흩어지면, 이곳도 꽃밭이 된다)
   if (v.x0 < 0) {
+    ctx.save();
+    ctx.globalAlpha = 1 - st.bloomWide * 0.9;
     ctx.fillStyle = PAPER;
     ctx.fillRect(v.x0 - 100, v.y0 - 100, -v.x0 + 100, v.y1 - v.y0 + 200);
+    ctx.restore();
+    if (st.bloomWide > 0.01) {
+      ctx.save();
+      ctx.globalAlpha = 0.5 * st.bloomWide;
+      ctx.fillStyle = '#3a3a37';
+      ctx.fillRect(v.x0 - 100, 0, -v.x0 + 100, v.y1 + 200);
+      ctx.restore();
+      drawGlow(ctx, -400, -200, 900 * st.bloomWide, PETAL_COLORS, 0.4 * st.bloomWide);
+    }
     ctx.strokeStyle = 'rgba(30,30,28,0.35)';
     ctx.lineWidth = 2;
     ctx.beginPath();

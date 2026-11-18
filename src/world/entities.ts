@@ -607,7 +607,8 @@ export class Memory extends Entity {
     if (!this.seen) {
       this.seen = true;
       g.memories.add(this.id);
-      g.budPetal();
+      // (꽃밭의 마지막 조각은 꽃잎을 돋우지 않는다 — 이제 모두 내어줄 차례다)
+      if (this.id !== 'm_firsteye') g.budPetal();
       audio.play('paper_crush', { vol: 0.4 });
     }
     g.showMemory(this.art);

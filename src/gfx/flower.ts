@@ -26,7 +26,8 @@ export interface FlowerOpts {
 
 /** 빛 번짐 (밝은 배경 위라 가산 대신 옅은 색 안개) */
 export function drawGlow(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, colors: readonly string[], amt: number) {
-  if (amt <= 0.001) return;
+  // 꽃잎을 모두 내어준 꽃에는 빛이 없다
+  if (amt <= 0.001 || colors.length === 0) return;
   ctx.save();
   const n = Math.max(1, colors.length);
   for (let i = 0; i < n; i++) {

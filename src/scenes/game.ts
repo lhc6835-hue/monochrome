@@ -16,7 +16,7 @@ import { Player, PH } from '../world/player';
 import { Box, Entity, Resident, type Prompt } from '../world/entities';
 import { createEntity } from '../world/factory';
 import { Echo, Ladder, Shaft, Water, type Light } from '../world/entities2';
-import type { Solid } from '../world/physics';
+import { moveBody, type Body, type Solid } from '../world/physics';
 import type { GameAPI, LevelDef, TriggerDef } from '../world/types';
 import { LEVELS, LEVEL_ORDER } from '../world/levels';
 import { settingsPanel } from './title';
@@ -175,7 +175,11 @@ export class GameScene implements Scene, GameAPI {
   solids(): Solid[] {
     if (this.solidCache) return this.solidCache;
     const out = this.staticSolids.slice();
-    for (const e of this.ents) if (e.solid) out.push(e.solid);
+    for (const e of this.ents) {
+      if (e.solid) out.push(e.solid);
+      const sl = (e as unknown as { solidList?: Solid[] }).solidList;
+      if (sl) out.push(...sl);
+    }
     this.solidCache = out;
     return out;
   }
@@ -287,10 +291,10 @@ export class GameScene implements Scene, GameAPI {
   // ------------------------------------------------------------------
   // 저장 / 체크포인트
   // ------------------------------------------------------------------
-  private makeSnap(spawnX: number): Snap {
+  private makeSnap(spawnX: number, spawnY = 0): Snap {
     const ents: Record<string, unknown> = {};
     for (const e of this.ents) ents[e.id] = e.save();
-    return { ents, fired: [...this.fired], spawn: { x: spawnX, y: 0 } };
+    return { ents, fired: [...this.fired], spawn: { x: spawnX, y: spawnY } };
   }
 
   private persist() {
@@ -317,7 +321,7 @@ export class GameScene implements Scene, GameAPI {
     if (this.cpId === tr.id) return;
     this.cpId = tr.id;
     const sx = tr.spawnX ?? tr.x + tr.w / 2;
-    this.snap = this.makeSnap(sx);
+    this.snap = this.makeSnap(sx, tr.spawnY ?? 0);
     this.snapPetals = [...this.petals];
     this.snapSaved = [...this.saved];
     this.snapMem = [...this.memories];
@@ -473,13 +477,47 @@ export class GameScene implements Scene, GameAPI {
     // 떠 있는 상자 등 움직이는 발판 위에 서 있으면 함께 움직인다
     const pb = this.player.body;
     const gs = pb.groundSolid;
-    if (pb.onGround && gs && gs.owner instanceof Box && this.player.state !== 'climb') pb.y = gs.y;
+    if (pb.onGround && gs && (gs.owner instanceof Box || gs.carry) && this.player.state !== 'climb') {
+      pb.y = gs.y;
+      const ddx = (gs.owner as { dx?: number } | undefined)?.dx;
+      if (ddx) pb.x += ddx;
+    }
+    this.beltPass(h);
     const inp = app.input;
     this.player.update(this, inp, this.control && this.mode === 'play', h);
     // 입력의 pressed 는 첫 서브스텝에서만 유효하도록
     if (first) {
       inp.consume('jump');
       inp.consume('down');
+    }
+  }
+
+  /** 컨베이어 위에 선 몸들을 실어 나른다 (굳은 주민도) */
+  private beltPass(h: number) {
+    const all = this.solids();
+    const belts = all.filter((s) => s.belt);
+    if (!belts.length) return;
+    const carry = (b: Body, ignore?: unknown) => {
+      for (const s of belts) {
+        if (Math.abs(b.y - s.y) < 3 && b.x + b.w / 2 > s.x + 2 && b.x - b.w / 2 < s.x + s.w - 2) {
+          const onG = b.onGround,
+            gs = b.groundSolid;
+          moveBody(b, s.belt! * h, 0, all, { ignore });
+          b.y = s.y;
+          b.onGround = onG || true;
+          b.groundSolid = gs ?? s;
+          return;
+        }
+      }
+    };
+    const st = this.player.state;
+    if (st !== 'climb' && st !== 'mantle' && st !== 'dead') carry(this.player.body);
+    for (const e of this.ents) {
+      if (e instanceof Box) {
+        carry(e.body, e);
+        e.sync();
+      } else if (e instanceof Resident && e.state !== 'gone') carry(e.body, e);
+      else if (e instanceof Echo && e.alive) carry(e.body, e);
     }
   }
 
@@ -1018,6 +1056,21 @@ export class GameScene implements Scene, GameAPI {
         for (let x = so.x + 10; x < so.x + so.w; x += 40) ctx.fillRect(x, so.y - 50, 6, 50);
         ctx.fillRect(so.x, so.y - 54, so.w, 6);
         return;
+      case 'crate':
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.roundRect(so.x, so.y, so.w, so.h, 6);
+        ctx.fill();
+        ctx.strokeStyle = '#7a7a76';
+        ctx.lineWidth = 2;
+        for (let y = so.y + 100; y < so.y + so.h; y += 100) {
+          ctx.beginPath();
+          ctx.moveTo(so.x, y);
+          ctx.lineTo(so.x + so.w, y);
+          ctx.stroke();
+        }
+        ctx.strokeRect(so.x + 10, so.y + 10, so.w - 20, Math.min(80, so.h - 20));
+        return;
       case 'pipe': {
         ctx.fillStyle = INK;
         ctx.beginPath();
@@ -1194,7 +1247,12 @@ export class GameScene implements Scene, GameAPI {
       mems += lv.entities.filter((d) => d.type === 'memory').length;
       if (id === this.level.id) break;
     }
-    line(this.level.id === 'town' ? '어둠 속에서도, 손에 든 꽃은 빛나고 있었다.' : '위에서 기계 소리가 들려왔다. 쿵, 쿵, 쿵.', s.H * 0.38, 2.0, 26);
+    const closing: Record<string, string> = {
+      town: '어둠 속에서도, 손에 든 꽃은 빛나고 있었다.',
+      drain: '위에서 기계 소리가 들려왔다. 쿵, 쿵, 쿵.',
+      factory: '기차는 회색 들판을 가로질러 달렸다.',
+    };
+    line(closing[this.level.id] ?? '', s.H * 0.38, 2.0, 26);
     line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${this.memories.size} / ${mems}`, s.H * 0.5, 4.0, 19, '#8d8d8a');
     line('— 여기까지가 현재 개발된 부분입니다 —', s.H * 0.6, 5.5, 18, '#6f6f6c');
     if (t > 8) line('아무 키나 누르면 타이틀로 돌아갑니다', s.H * 0.8, 8, 16, '#5a5a57');

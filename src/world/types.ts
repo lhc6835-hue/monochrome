@@ -56,7 +56,19 @@ export type EntityDef =
   /** 메아리: 소리로 사냥하는 하얀 존재 */
   | { type: 'echo'; id: string; x: number; y?: number; x0: number; x1: number; hunt?: boolean; dormant?: boolean }
   /** 천장 격자로 들어오는 빛줄기 */
-  | { type: 'shaft'; id: string; x: number; w?: number; top?: number; bright?: number };
+  | { type: 'shaft'; id: string; x: number; w?: number; top?: number; bright?: number }
+  /** 컨베이어 벨트 (윗면 y). sink 를 넘어간 굳은 주민은 기계 속으로 사라진다 */
+  | { type: 'conveyor'; id: string; x0: number; x1: number; y: number; speed: number; auto?: boolean; sink?: number }
+  /** 프레스: 머리가 floor 까지 내려찍는다. upY = 올라갔을 때 머리 아랫면 */
+  | { type: 'press'; id: string; x: number; w: number; floor: number; upY: number; period: number; phase?: number; head?: number; big?: boolean }
+  /** 검수대: 굳어 있지 않으면 통과할 수 없는 빛의 막 */
+  | { type: 'scanner'; id: string; x: number; top: number; bottom: number }
+  /** 위아래로 오가는 승강 발판 */
+  | { type: 'lift'; id: string; x: number; w: number; y0: number; y1: number; period: number; phase?: number }
+  /** 추격전: 천장 레일을 타고 쫓아오는 거대한 도장 */
+  | { type: 'giant'; id: string; x: number; rail: number; floor: number }
+  /** 화물열차 (마지막에 뛰어오른다) */
+  | { type: 'train'; id: string; x: number; y: number };
 
 export interface TriggerDef {
   id: string;
@@ -68,6 +80,7 @@ export interface TriggerDef {
   checkpoint?: boolean;
   /** 체크포인트 부활 위치 (기본: 트리거 중앙) */
   spawnX?: number;
+  spawnY?: number;
   hint?: { kb: string; touch?: string; dur?: number };
   script?: string;
 }

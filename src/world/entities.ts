@@ -55,6 +55,7 @@ export class Box extends Entity {
   }
   sync() {
     const b = this.body;
+    if (!this.solid) return;
     const s = this.solid!;
     s.x = b.x - b.w / 2;
     s.y = b.y - b.h;
@@ -307,6 +308,15 @@ export class Resident extends Entity {
     audio.play('chime', { vol: 0.4 });
     audio.play('click3', { vol: 0.4, rate: 0.7, delay: 0.25 });
     this.facing = g.player.x < this.body.x ? -1 : 1;
+  }
+
+  /** 기계 속으로 사라진다 (아이콘으로 찍힘) */
+  lose(g: GameAPI) {
+    if (this.state !== 'frozen') return;
+    this.state = 'gone';
+    this.alpha = 0;
+    g.flags.add('lost:' + this.id);
+    g.parts.paper(this.body.x, this.body.y - this.scale * 0.5, 14, 1);
   }
 
   command(kind: 'goto' | 'stay' | 'follow' | 'leave' | 'crawl', x?: number) {

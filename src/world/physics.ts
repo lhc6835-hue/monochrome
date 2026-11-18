@@ -7,6 +7,10 @@ export interface Solid extends Rect {
   /** 이 고체를 소유한 엔티티 (상자 등) */
   owner?: unknown;
   look?: string;
+  /** 컨베이어 속도 (위에 선 것을 실어 나른다) */
+  belt?: number;
+  /** 움직이는 발판: 위에 선 것이 함께 움직인다 */
+  carry?: boolean;
 }
 
 /** 발 중심 (x, y=바닥) 기준 AABB 몸체 */

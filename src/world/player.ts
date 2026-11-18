@@ -353,6 +353,20 @@ export class Player implements PlayerLike {
       }
     }
     moveBody(b, dx, b.vy * dt, g.solids());
+    // 낮은 턱(46px 이하)은 걸어서 올라선다
+    if (b.onGround && (b.hitR || b.hitL) && ax !== 0 && this.state === 'normal') {
+      const dir = b.hitR ? 1 : -1;
+      for (const so of g.solids()) {
+        if (so.oneway) continue;
+        const side = dir > 0 ? so.x : so.x + so.w;
+        if (Math.abs((dir > 0 ? b.right : b.left) - side) > 2) continue;
+        if (so.y >= b.y || so.y < b.y - 46) continue;
+        if (!areaFree({ x: b.x - b.w / 2 + dir * 4, y: so.y - b.h - 1, w: b.w, h: b.h }, g.solids())) continue;
+        b.y = so.y;
+        b.x += dir * 4;
+        break;
+      }
+    }
 
     // ---------- 턱 오르기 감지 ----------
     if (!b.onGround && this.state === 'normal' && ax !== 0 && b.vy > -350) {

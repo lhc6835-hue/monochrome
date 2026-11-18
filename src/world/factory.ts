@@ -1,6 +1,7 @@
 import type { EntityDef } from './types';
 import { Box, Cctv, Faller, Gate, Memory, PetalPickup, Plate, Resident, type Entity } from './entities';
 import { Echo, Ladder, Lever, Shaft, Water } from './entities2';
+import { Conveyor, GiantStamp, Lift, Press, Scanner, Train } from './entities3';
 
 export function createEntity(def: EntityDef): Entity {
   switch (def.type) {
@@ -30,5 +31,17 @@ export function createEntity(def: EntityDef): Entity {
       return new Echo(def);
     case 'shaft':
       return new Shaft(def);
+    case 'conveyor':
+      return new Conveyor(def);
+    case 'press':
+      return new Press(def);
+    case 'scanner':
+      return new Scanner(def);
+    case 'lift':
+      return new Lift(def);
+    case 'giant':
+      return new GiantStamp(def);
+    case 'train':
+      return new Train(def);
   }
 }

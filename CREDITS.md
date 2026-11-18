@@ -31,6 +31,11 @@
 | splash1~3, bubble1~2, water_loop | 40 CC0 water / splash / slime SFX | rubberduck |
 | mstep1~4 | Metal footsteps on concrete | thimras |
 | machine | 100 CC0 SFX | rubberduck |
+| amb_factory | Steam boiler sound loop | — |
+| conveyor, machine_loop, alarm_loop | 30 CC0 SFX loops | rubberduck |
+| train_engine | Steamboat Engine Sound | — |
+| whistle | Steam whistle | — |
+| hiss1~2 | Steam release sounds | — |
 
 모든 소리는 잘라내기 / 음량 정규화(ffmpeg loudnorm) / MP3 변환을 거쳤습니다.
 

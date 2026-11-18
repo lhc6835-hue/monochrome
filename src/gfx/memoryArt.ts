@@ -109,7 +109,45 @@ function givingArt(): Stroke[] {
   return S;
 }
 
-const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt };
+function factoryArt(): Stroke[] {
+  const S: Stroke[] = [];
+  S.push({ pts: [[-440, 190], [440, 190]], color: GRAY, w: 5 });
+  // 기계 (네모 상자와 톱니)
+  S.push({ pts: [[-60, 190], [-60, -40], [120, -40], [120, 190]], color: DARK, w: 6 });
+  S.push({ pts: circle(30, -90, 40, 12), color: DARK, w: 5 });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * TAU;
+    S.push({ pts: [[30 + Math.cos(a) * 40, -90 + Math.sin(a) * 40], [30 + Math.cos(a) * 56, -90 + Math.sin(a) * 56]], color: DARK, w: 5 });
+  }
+  // 들어가는 사람들: 제각각의 키, 가슴에 색
+  [-330, -250, -170].forEach((x, i) => {
+    const h = [1, 0.75, 0.9][i];
+    const top = 190 - 220 * h;
+    S.push({ pts: circle(x, top + 24, 22 * h + 4), color: DARK, w: 5 });
+    S.push({ pts: [[x, top + 50], [x, 190 - 70 * h]], color: DARK, w: 5 });
+    S.push({ pts: [[x, 190 - 70 * h], [x - 18, 188]], color: DARK, w: 5 });
+    S.push({ pts: [[x, 190 - 70 * h], [x + 22, 188]], color: DARK, w: 5 });
+    S.push({ pts: [[x, top + 80], [x + 30, top + 110]], color: DARK, w: 5 });
+    S.push({ pts: circle(x, top + 90, 7, 8), color: PETAL_COLORS[(i * 3) % 7], w: 4, fill: true });
+  });
+  // 나오는 아이콘들: 똑같은 키, 색 없음, 차렷 자세
+  [200, 270, 340, 410].forEach((x) => {
+    S.push({ pts: circle(x, 46, 18), color: GRAY, w: 5 });
+    S.push({ pts: [[x - 22, 72], [x + 22, 72], [x + 22, 188], [x - 22, 188], [x - 22, 72]], color: GRAY, w: 5 });
+  });
+  // 문 밖의 정원사: 꽃잎이 하나도 없는 줄기만 들고 있다
+  S.push({ pts: [[-400, 40], [-200, 40]], color: GRAY, w: 4 });
+  S.push({ pts: circle(-300, -210, 30), color: DARK, w: 5 });
+  S.push({ pts: [[-300, -180], [-300, -60]], color: DARK, w: 5 });
+  S.push({ pts: [[-300, -60], [-326, 40]], color: DARK, w: 5 });
+  S.push({ pts: [[-300, -60], [-274, 40]], color: DARK, w: 5 });
+  S.push({ pts: [[-300, -130], [-250, -170], [-246, -230]], color: DARK, w: 5 });
+  S.push({ pts: [[-246, -230], [-240, -270]], color: STEM, w: 4 });
+  S.push({ pts: [[-312, -206], [-314, -190]], color: '#8fb3e0', w: 3 });
+  return S;
+}
+
+const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt };
 const cache = new Map<string, Stroke[]>();
 
 export function drawMemory(s: Screen, art: string, t: number, alpha: number) {

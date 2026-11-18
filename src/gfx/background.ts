@@ -158,3 +158,36 @@ export function drainTheme(width: number, seed = 21): BgTheme {
   };
   return { skyTop: '#2f2f2c', skyMid: '#3d3d39', skyBot: '#363632', layers: [arches, pipes] };
 }
+
+/** 아이콘 공장 배경: 굴뚝, 톱니, 크레인 */
+export function factoryTheme(width: number, seed = 33): BgTheme {
+  const rng = mulberry32(seed);
+  const pick = <T>(a: T[]) => a[Math.floor(rng() * a.length)];
+  const far: BgLayer = {
+    p: 0.15,
+    color: '#9c9b96',
+    ground: -40,
+    band: '#9c9b96',
+    haze: 0.12,
+    items: scatter(rng, -1200, width * 0.15 + 2600, 180, 420, (x) => ({
+      icon: pick<IconName>(['factory', 'industry', 'factory', 'radioTower']),
+      x,
+      h: 300 + rng() * 360,
+      sx: 0.9 + rng() * 0.5,
+    })),
+  };
+  const mid: BgLayer = {
+    p: 0.45,
+    color: '#6f6e6a',
+    ground: -10,
+    band: '#6f6e6a',
+    items: scatter(rng, -1200, width * 0.45 + 2400, 300, 700, (x) => {
+      const r = rng();
+      if (r < 0.35) return { icon: 'fan', x, h: 160 + rng() * 140, y: -260 - rng() * 200 };
+      if (r < 0.6) return { icon: 'crane', x, h: 360 + rng() * 160 };
+      if (r < 0.8) return { icon: 'pipe', x, h: 220, y: -300, flip: rng() < 0.5 };
+      return { icon: 'crate', x, h: 120 + rng() * 80 };
+    }),
+  };
+  return { skyTop: '#8a8985', skyMid: '#a9a8a3', skyBot: '#9f9e99', layers: [far, mid] };
+}

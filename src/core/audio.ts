@@ -9,6 +9,7 @@ const SOUND_FILES = [
   'amb_town', 'amb_ghost', 'amb_wind', 'chase_bed', 'horror_long', 'time_loop', 'music_despair',
   'splash1', 'splash2', 'splash3', 'bubble1', 'bubble2', 'drip1', 'drip2', 'amb_drain', 'amb_dungeon', 'amb_rumble',
   'water_loop', 'mstep1', 'mstep2', 'mstep3', 'mstep4', 'machine', 'valve', 'rattle',
+  'amb_factory', 'conveyor', 'machine_loop', 'alarm_loop', 'train_engine', 'whistle', 'hiss1', 'hiss2',
 ] as const;
 export type SoundName = (typeof SOUND_FILES)[number];
 

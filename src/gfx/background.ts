@@ -132,3 +132,29 @@ function hazeA(hex: string, a: number) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
+
+/** 지하 배수로 배경: 아치형 터널과 매달린 파이프 */
+export function drainTheme(width: number, seed = 21): BgTheme {
+  const rng = mulberry32(seed);
+  const pick = <T>(a: T[]) => a[Math.floor(rng() * a.length)];
+  const arches: BgLayer = {
+    p: 0.3,
+    color: '#4c4c47',
+    ground: -60,
+    band: '#3e3e3a',
+    items: scatter(rng, -1200, width * 0.3 + 2400, 520, 640, (x) => ({ icon: 'bridge', x, h: 520, sx: 1.6 })),
+  };
+  const pipes: BgLayer = {
+    p: 0.6,
+    color: '#33332f',
+    ground: -20,
+    band: '#2c2c29',
+    items: scatter(rng, -1200, width * 0.6 + 2400, 260, 620, (x) => {
+      const r = rng();
+      if (r < 0.45) return { icon: 'pipe', x, h: 200 + rng() * 120, y: -380 - rng() * 120, flip: rng() < 0.5 };
+      if (r < 0.7) return { icon: 'fan', x, h: 120, y: -420 };
+      return { icon: pick<IconName>(['wall', 'wall', 'ladder']), x, h: 220 + rng() * 80 };
+    }),
+  };
+  return { skyTop: '#2f2f2c', skyMid: '#3d3d39', skyBot: '#363632', layers: [arches, pipes] };
+}

@@ -7,6 +7,8 @@ const SOUND_FILES = [
   'ghost_breath', 'heart_slow', 'heart_fast', 'elevator_door', 'door_open', 'door_close', 'slam', 'switch',
   'lever', 'clank', 'clunk', 'weird1', 'weird2', 'sting1', 'sting2', 'sting3', 'sting4', 'sting5',
   'amb_town', 'amb_ghost', 'amb_wind', 'chase_bed', 'horror_long', 'time_loop', 'music_despair',
+  'splash1', 'splash2', 'splash3', 'bubble1', 'bubble2', 'drip1', 'drip2', 'amb_drain', 'amb_dungeon', 'amb_rumble',
+  'water_loop', 'mstep1', 'mstep2', 'mstep3', 'mstep4', 'machine', 'valve', 'rattle',
 ] as const;
 export type SoundName = (typeof SOUND_FILES)[number];
 
@@ -187,8 +189,8 @@ export class Audio {
     this.lowpass.frequency.setTargetAtTime(f, this.ctx.currentTime, time / 3);
   }
 
-  step(i: number, vol = 0.5) {
-    const n = (['step1', 'step2', 'step3', 'step4'] as const)[i % 4];
+  step(i: number, vol = 0.5, metal = false) {
+    const n = (metal ? (['mstep1', 'mstep2', 'mstep3', 'mstep4'] as const) : (['step1', 'step2', 'step3', 'step4'] as const))[i % 4];
     this.play(n, { vol, vary: 0.08 });
   }
 }

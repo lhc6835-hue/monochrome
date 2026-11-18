@@ -13,13 +13,25 @@ import { drawBlankFigure, drawErasedRegion, PAPER } from '../gfx/blank';
 import { drawMemory } from '../gfx/memoryArt';
 import { rigidPose } from '../gfx/figure';
 import { Player, PH } from '../world/player';
-import { Box, Entity, Resident, createEntity, type Prompt } from '../world/entities';
+import { Box, Entity, Resident, type Prompt } from '../world/entities';
+import { createEntity } from '../world/factory';
+import { Echo, Ladder, Shaft, Water, type Light } from '../world/entities2';
 import type { Solid } from '../world/physics';
 import type { GameAPI, LevelDef, TriggerDef } from '../world/types';
-import { town, townCustomPrompt } from '../world/levels/town';
+import { LEVELS, LEVEL_ORDER } from '../world/levels';
 import { settingsPanel } from './title';
 
-type Mode = 'play' | 'dying' | 'memory' | 'paused' | 'ending';
+type Mode = 'play' | 'dying' | 'memory' | 'paused' | 'ending' | 'transition';
+
+/** 구간을 넘어가도 이어지는 진행 상황 */
+export interface Carry {
+  petals: string[];
+  saved: string[];
+  memories: string[];
+  flags: string[];
+  playTime: number;
+  deaths: number;
+}
 
 interface Flight {
   color: string;
@@ -39,7 +51,7 @@ interface Snap {
 const KR = '"Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
 
 export class GameScene implements Scene, GameAPI {
-  level: LevelDef = town;
+  level: LevelDef;
   t = 0;
   dt = 0;
   cam = new Camera();
@@ -89,7 +101,17 @@ export class GameScene implements Scene, GameAPI {
   private camY = -330;
   private fps = 60;
 
-  constructor(private save: SaveData | null) {
+  private transT = 0;
+  private nextLevel = '';
+  private drownT = 0;
+  private hasEcho = false;
+
+  constructor(
+    private save: SaveData | null,
+    levelId?: string,
+    private carry?: Carry,
+  ) {
+    this.level = LEVELS[save?.region ?? levelId ?? 'town'] ?? LEVELS.town;
     this.theme = this.level.theme();
     for (const s of this.level.solids) this.staticSolids.push({ ...s });
     for (const d of this.level.entities) {
@@ -97,6 +119,7 @@ export class GameScene implements Scene, GameAPI {
       this.ents.push(e);
       this.byId.set(e.id, e);
     }
+    this.hasEcho = this.ents.some((e) => e instanceof Echo);
     // 근경 실루엣
     const rng = mulberry32(5);
     for (let x = -1200; x < 0; x += 900 + rng() * 1300) {
@@ -111,12 +134,29 @@ export class GameScene implements Scene, GameAPI {
     if (this.save) {
       this.applySave(this.save);
     } else {
-      const sx = params.has('x') ? parseFloat(params.get('x')!) : this.level.spawn.x;
-      this.player.place(sx, this.level.spawn.y);
+      const useX = params.has('x') && !this.carry;
+      const sx = useX ? parseFloat(params.get('x')!) : this.level.spawn.x;
+      const sy = useX ? 0 : this.level.spawn.y;
+      this.player.place(sx, sy);
+      if (this.carry) {
+        const c = this.carry;
+        this.petals = [...c.petals];
+        this.saved = new Set(c.saved);
+        this.memories = new Set(c.memories);
+        this.flags = new Set(c.flags);
+        this.playTime = c.playTime;
+        this.deaths = c.deaths;
+      }
       this.snap = this.makeSnap(sx);
-      if (!params.has('x')) this.co.run(this.level.scripts.opening(this), 'opening');
+      this.snap.spawn.y = 0;
+      this.snapPetals = [...this.petals];
+      this.snapSaved = [...this.saved];
+      this.snapMem = [...this.memories];
+      if (this.carry) this.persist();
+      const st = this.level.startScript;
+      if (!useX && st && this.level.scripts[st]) this.co.run(this.level.scripts[st](this), st);
       // ?x 로 시작하면 지나온 트리거는 발동된 것으로
-      if (params.has('x')) for (const tr of this.level.triggers) if (tr.x + tr.w < sx && tr.once) this.fired.add(tr.id);
+      if (useX) for (const tr of this.level.triggers) if (tr.x + tr.w < sx && tr.once) this.fired.add(tr.id);
     }
     this.snapCamera();
     this.fadeA = 1;
@@ -150,7 +190,30 @@ export class GameScene implements Scene, GameAPI {
     this.hintT = 0;
     this.hintDur = dur;
   }
-  kill(cause: 'erase' | 'fall' | 'crush') {
+  noise(x: number, y: number, r: number) {
+    if (!this.hasEcho) return;
+    for (const e of this.ents) if (e instanceof Echo) e.hear(x, y, r, this.t);
+    if (r >= 300 && this.level.dark) this.parts.ring(x, y - 50, 'rgba(230,230,225,0.5)', r * 0.22, 0.7);
+  }
+  waterAt(x: number) {
+    for (const e of this.ents) if (e instanceof Water && x >= e.x0 && x <= e.x1) return e;
+    return null;
+  }
+  ladders(): Ladder[] {
+    return this.ents.filter((e): e is Ladder => e instanceof Ladder);
+  }
+  goToLevel(id: string) {
+    if (this.mode === 'transition') return;
+    if (!LEVELS[id]) {
+      this.endSlice();
+      return;
+    }
+    this.mode = 'transition';
+    this.transT = 0;
+    this.nextLevel = id;
+    audio.stopAllLoops(1.4);
+  }
+  kill(cause: 'erase' | 'fall' | 'crush' | 'drown') {
     if (this.mode !== 'play' || this.player.state === 'dead' || this.co.running('end')) return;
     this.player.die(cause);
     this.mode = 'dying';
@@ -161,6 +224,10 @@ export class GameScene implements Scene, GameAPI {
       audio.play('paper_rip', { vol: 0.9 });
       audio.play('erase', { vol: 0.9, rate: 0.8 });
       this.parts.paper(this.player.x, this.player.y - 70, 22, 1.4);
+    } else if (cause === 'drown') {
+      audio.play('bubble1', { vol: 0.8 });
+      audio.play('bubble2', { vol: 0.6, delay: 0.3 });
+      audio.play('sting4', { vol: 0.4 });
     } else if (cause === 'crush') {
       audio.play('land_hard', { vol: 1 });
       audio.play('sting3', { vol: 0.6 });
@@ -327,6 +394,16 @@ export class GameScene implements Scene, GameAPI {
       }
       return;
     }
+    if (this.mode === 'transition') {
+      this.transT += dt;
+      if (this.transT > 1.8) {
+        this.mode = 'ending';
+        this.endT = -999;
+        const c: Carry = { petals: [...this.petals], saved: [...this.saved], memories: [...this.memories], flags: [...this.flags], playTime: this.playTime, deaths: this.deaths };
+        app.setScene(new GameScene(null, this.nextLevel, c));
+      }
+      return;
+    }
     if (inp.pressed('pause') && this.mode === 'play') {
       this.openPause();
       return;
@@ -352,6 +429,14 @@ export class GameScene implements Scene, GameAPI {
 
     // 떨어짐
     if (this.player.y > this.level.killY && this.player.state !== 'dead') this.kill('fall');
+    // 익사
+    const wa = this.waterAt(this.player.x);
+    const pb = this.player.body;
+    if (wa && this.mode === 'play' && this.player.state !== 'climb' && pb.y - pb.h + 10 > wa.level) {
+      this.drownT += dt;
+      if (Math.random() < dt * 8) this.parts.add({ t: 'spark', x: pb.x + rand(-10, 10), y: pb.y - pb.h + 10, vy: -60, life: 0.8, size: 6, color: '#cfcfcb', drag: 1 });
+      if (this.drownT > 1.15) this.kill('drown');
+    } else this.drownT = Math.max(0, this.drownT - dt * 2);
 
     if (this.mode === 'dying') {
       this.dieT += dt;
@@ -381,9 +466,14 @@ export class GameScene implements Scene, GameAPI {
     this.solidCache = null;
     this.signals.clear();
     // 발판 먼저 (신호), 그 다음 나머지
-    for (const e of this.ents) if (e.type === 'plate') e.update(this, h);
-    for (const e of this.ents) if (e.type !== 'plate') e.update(this, h);
+    const isSignal = (e: Entity) => e.type === 'plate' || e.type === 'lever';
+    for (const e of this.ents) if (isSignal(e)) e.update(this, h);
+    for (const e of this.ents) if (!isSignal(e)) e.update(this, h);
     this.solidCache = null;
+    // 떠 있는 상자 등 움직이는 발판 위에 서 있으면 함께 움직인다
+    const pb = this.player.body;
+    const gs = pb.groundSolid;
+    if (pb.onGround && gs && gs.owner instanceof Box && this.player.state !== 'climb') pb.y = gs.y;
     const inp = app.input;
     this.player.update(this, inp, this.control && this.mode === 'play', h);
     // 입력의 pressed 는 첫 서브스텝에서만 유효하도록
@@ -411,7 +501,7 @@ export class GameScene implements Scene, GameAPI {
           best = { p: pr, x: pos[0], y: pos[1], act: () => this.doInteract(e) };
         }
       }
-      const cp = townCustomPrompt(this);
+      const cp = this.level.customPrompt?.(this) ?? null;
       if (cp && !best) best = { p: { text: cp.text, hold: 0 }, x: cp.x, y: cp.y, act: cp.act };
     }
     this.prompt = best;
@@ -443,6 +533,7 @@ export class GameScene implements Scene, GameAPI {
       this.player.startGive(dir);
       const color = this.petals.pop()!;
       audio.play('swish2', { vol: 0.3, rate: 0.8 });
+      this.noise(e.body.x, e.body.y, 640);
       this.co.run(
         (function* (g: GameScene) {
           yield 0.32;
@@ -558,9 +649,20 @@ export class GameScene implements Scene, GameAPI {
     cam.update(dt);
   }
 
+  private dripT = 0;
   private ambientDust(dt: number) {
     this.dustT += dt;
     const v = this.cam.view(app.screen);
+    if (this.level.drips) {
+      this.dripT += dt;
+      while (this.dripT > 0.35) {
+        this.dripT -= 0.35;
+        const x = v.x0 + Math.random() * (v.x1 - v.x0);
+        this.parts.add({ t: 'spark', x, y: -710, vx: 0, vy: 80, life: 1.2, size: 4, color: '#a7a7a2', drag: 0, g: 1500 });
+        if (Math.random() < 0.25) audio.play(Math.random() < 0.5 ? 'drip1' : 'drip2', { vol: 0.12 + Math.random() * 0.1, pan: (x - this.cam.x) / 900, rate: 0.9 + Math.random() * 0.3 });
+      }
+      return;
+    }
     while (this.dustT > 0.09) {
       this.dustT -= 0.09;
       this.parts.add({
@@ -725,6 +827,8 @@ export class GameScene implements Scene, GameAPI {
     cam.apply(ctx, s, 1);
     this.parts.render(ctx);
 
+    if (this.level.dark) this.drawDarkness(this.level.dark);
+
     // 근경
     cam.apply(ctx, s, 1.3);
     const vf = cam.view(s, 1.3);
@@ -760,6 +864,96 @@ export class GameScene implements Scene, GameAPI {
 
     if (this.mode === 'memory') drawMemory(s, this.memArt, this.memT, clamp(this.memT / 0.5));
     if (this.mode === 'ending') this.drawEnding();
+    if (this.mode === 'transition') app.post.fill(s, '#000', clamp(this.transT / 1.4));
+  }
+
+  private collectLights(): Light[] {
+    const out: Light[] = [];
+    const p = this.player;
+    const j = p.joints;
+    if (j && p.state !== 'dead') {
+      const hide = p.freezeAmt > 0.5;
+      const [hx, hy] = hide ? [p.x, p.y - 80] : j.hand[j.near];
+      const flick = 1 + Math.sin(this.t * 7.3) * 0.015 + Math.sin(this.t * 2.1) * 0.02;
+      const r = hide ? 120 : (150 + this.petals.length * 45) * flick;
+      out.push({ kind: 'circle', x: hx, y: hy - 25, r, a: 1 });
+      out.push({ kind: 'circle', x: p.x, y: p.y - 70, r: 110, a: 0.5 });
+    }
+    for (const e of this.ents) {
+      const le = (e as unknown as { lights?: () => Light[] }).lights;
+      if (le) out.push(...le.call(e));
+      if (e.type === 'petal' && !(e as unknown as { taken: boolean }).taken) {
+        const pe = e as unknown as { x: number; y: number };
+        out.push({ kind: 'circle', x: pe.x, y: pe.y, r: 90, a: 0.7 });
+      }
+      if (e.type === 'memory') {
+        const m = e as unknown as { x: number; y: number };
+        out.push({ kind: 'circle', x: m.x, y: m.y - 150, r: 110, a: 0.55 });
+      }
+      if (e instanceof Resident && e.iris && e.state !== 'gone') out.push({ kind: 'circle', x: e.body.x, y: e.body.y - e.scale * 0.66, r: 90, a: 0.45 });
+    }
+    for (const f of this.flights) {
+      const [x, y] = this.flightPos(f);
+      out.push({ kind: 'circle', x, y, r: 110, a: 0.8 });
+    }
+    return out;
+  }
+
+  /** 어둠: 화면을 덮고 빛이 닿는 곳만 파낸다 */
+  private drawDarkness(dark: number) {
+    const s = app.screen;
+    const L = app.fxLayer;
+    s.clearLayer(L);
+    const c = L.ctx;
+    s.base(c);
+    c.fillStyle = `rgba(4,4,5,${dark})`;
+    c.fillRect(-10, -10, s.W + 20, s.H + 20);
+    this.cam.apply(c, s, 1);
+    c.globalCompositeOperation = 'destination-out';
+    for (const l of this.collectLights()) {
+      if (l.kind === 'circle') {
+        const g = c.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
+        g.addColorStop(0, `rgba(0,0,0,${l.a})`);
+        g.addColorStop(0.55, `rgba(0,0,0,${l.a * 0.7})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = g;
+        c.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
+      } else {
+        for (let k = 0; k < 3; k++) {
+          const spread = 1 + k * 0.35;
+          const g = c.createLinearGradient(0, l.top, 0, l.bottom);
+          g.addColorStop(0, `rgba(0,0,0,${(l.a * 0.6) / (k + 1)})`);
+          g.addColorStop(1, `rgba(0,0,0,${(l.a * 0.35) / (k + 1)})`);
+          c.fillStyle = g;
+          c.beginPath();
+          c.moveTo(l.x - (l.w / 2) * spread, l.top);
+          c.lineTo(l.x + (l.w / 2) * spread, l.top);
+          c.lineTo(l.x + l.w * 0.95 * spread, l.bottom);
+          c.lineTo(l.x - l.w * 0.95 * spread, l.bottom);
+          c.closePath();
+          c.fill();
+        }
+        // 빛이 닿는 바닥
+        const g = c.createRadialGradient(l.x, l.bottom - 60, 0, l.x, l.bottom - 60, l.w * 1.6);
+        g.addColorStop(0, `rgba(0,0,0,${l.a * 0.5})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = g;
+        c.fillRect(l.x - l.w * 1.6, l.bottom - 60 - l.w * 1.6, l.w * 3.2, l.w * 3.2);
+      }
+    }
+    c.globalCompositeOperation = 'source-over';
+    s.composite(L);
+    // 어둠 위에 보이는 것들: 빛줄기, 메아리(스스로 희미하게 빛난다)
+    const ctx = s.ctx;
+    this.cam.apply(ctx, s, 1);
+    for (const e of this.ents) if (e instanceof Shaft) e.drawBeam(ctx, this);
+    const echoes = this.ents.filter((e): e is Echo => e instanceof Echo);
+    if (echoes.length) {
+      s.clearLayer(L);
+      this.cam.apply(L.ctx, s, 1);
+      for (const e of echoes) e.drawEcho(L.ctx, this);
+      s.composite(L);
+    }
   }
 
   private drawSolid(ctx: CanvasRenderingContext2D, so: Solid, v: { x0: number; x1: number; y0: number; y1: number }) {
@@ -823,6 +1017,40 @@ export class GameScene implements Scene, GameAPI {
         ctx.fillStyle = INK;
         for (let x = so.x + 10; x < so.x + so.w; x += 40) ctx.fillRect(x, so.y - 50, 6, 50);
         ctx.fillRect(so.x, so.y - 54, so.w, 6);
+        return;
+      case 'pipe': {
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.roundRect(so.x, so.y, so.w, so.h, so.h / 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.13)';
+        ctx.fillRect(so.x + 6, so.y + 4, so.w - 12, 3);
+        ctx.fillStyle = INK;
+        for (let x = so.x + 60; x < so.x + so.w - 30; x += 160) ctx.fillRect(x, so.y - 5, 16, so.h + 10);
+        return;
+      }
+      case 'ceiling':
+        ctx.fillStyle = INK;
+        ctx.fillRect(Math.max(so.x, v.x0 - 60), so.y, Math.min(so.x + so.w, v.x1 + 60) - Math.max(so.x, v.x0 - 60), so.h);
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.fillRect(Math.max(so.x, v.x0 - 60), so.y + so.h - 3, Math.min(so.x + so.w, v.x1 + 60) - Math.max(so.x, v.x0 - 60), 3);
+        return;
+      case 'brick':
+        drawBlock(ctx, so.x, so.y, so.w, so.h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 2;
+        for (let y = so.y + 30, r = 0; y < so.y + so.h; y += 30, r++) {
+          ctx.beginPath();
+          ctx.moveTo(so.x, y);
+          ctx.lineTo(so.x + so.w, y);
+          ctx.stroke();
+          for (let x = so.x + (r % 2 ? 30 : 0); x < so.x + so.w; x += 60) {
+            ctx.beginPath();
+            ctx.moveTo(x, y - 30);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+          }
+        }
         return;
       case 'platform':
         drawBlock(ctx, so.x, so.y, so.w, so.h);
@@ -958,9 +1186,15 @@ export class GameScene implements Scene, GameAPI {
       ctx.font = `300 ${size}px ${KR}`;
       ctx.fillText(txt, s.W / 2, y);
     };
-    const savable = this.ents.filter((e) => e instanceof Resident && e.savable).length;
-    const mems = this.ents.filter((e) => e.type === 'memory').length;
-    line('어둠 속에서도, 손에 든 꽃은 빛나고 있었다.', s.H * 0.38, 2.0, 26);
+    let savable = 0,
+      mems = 0;
+    for (const id of LEVEL_ORDER) {
+      const lv = LEVELS[id];
+      savable += lv.entities.filter((d) => d.type === 'resident' && d.savable).length;
+      mems += lv.entities.filter((d) => d.type === 'memory').length;
+      if (id === this.level.id) break;
+    }
+    line(this.level.id === 'town' ? '어둠 속에서도, 손에 든 꽃은 빛나고 있었다.' : '위에서 기계 소리가 들려왔다. 쿵, 쿵, 쿵.', s.H * 0.38, 2.0, 26);
     line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${this.memories.size} / ${mems}`, s.H * 0.5, 4.0, 19, '#8d8d8a');
     line('— 여기까지가 현재 개발된 부분입니다 —', s.H * 0.6, 5.5, 18, '#6f6f6c');
     if (t > 8) line('아무 키나 누르면 타이틀로 돌아갑니다', s.H * 0.8, 8, 16, '#5a5a57');

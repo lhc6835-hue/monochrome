@@ -39,6 +39,7 @@ export class Body {
 }
 
 const EPS = 0.001;
+const STEP = 5;
 
 /**
  * 축 분리 이동. solids 는 매 호출마다 넘긴다.
@@ -53,7 +54,8 @@ export function moveBody(b: Body, dx: number, dy: number, solids: Solid[], opts:
       bot = b.y - EPS;
     for (const s of solids) {
       if (s.oneway || (opts.kid && s.kidPass) || (opts.ignore !== undefined && s.owner === opts.ignore) || (s.owner && s.owner === b)) continue;
-      if (bot <= s.y || top >= s.y + s.h) continue;
+      // 발밑 STEP 픽셀 이내의 윗면은 벽이 아니라 딛고 선 바닥으로 본다 (출렁이는 발판 대응)
+      if (bot <= s.y + STEP || top >= s.y + s.h) continue;
       const l = nx - b.w / 2,
         r = nx + b.w / 2;
       if (r <= s.x || l >= s.x + s.w) continue;
@@ -80,7 +82,7 @@ export function moveBody(b: Body, dx: number, dy: number, solids: Solid[], opts:
       if (r <= s.x || l >= s.x + s.w) continue;
       if (dy >= 0) {
         // 아래로: 위면에 착지
-        if (wasBottom <= s.y + EPS && ny >= s.y) {
+        if (wasBottom <= s.y + STEP && ny >= s.y) {
           ny = s.y;
           b.onGround = true;
           b.groundSolid = s;

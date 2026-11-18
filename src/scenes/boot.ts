@@ -43,7 +43,7 @@ export class BootScene implements Scene {
     if (this.state === 'ready' && this.fontsReady) {
       this.readyT += dt;
       if (this.readyT > 0.6) {
-        if (params.has('skip') || params.has('x')) app.setScene(new GameScene(params.has('continue') ? Save.load() : null));
+        if (params.has('skip') || params.has('x') || params.has('level')) app.setScene(new GameScene(params.has('continue') ? Save.load() : null, params.get('level') ?? undefined));
         else if (params.has('title')) app.setScene(new TitleScene(undefined, 4.1));
         else app.setScene(new StoryScene());
       }

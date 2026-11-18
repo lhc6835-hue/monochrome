@@ -190,7 +190,7 @@ function* end(g: GameAPI): Co {
   audio.play('land_hard', { vol: 0.7, delay: 0.5 });
   audio.play('sting5', { vol: 0.6, delay: 0.3 });
   yield 0.8;
-  g.endSlice();
+  g.goToLevel('drain');
 }
 
 function* opening(g: GameAPI): Co {
@@ -216,6 +216,8 @@ export const town: LevelDef = {
     { x0: 7700, x1: 11500, zoom: 0.88, lead: 300 },
   ],
   scripts: { kidBye, chase, end, opening },
+  startScript: 'opening',
+  customPrompt: (g) => townCustomPrompt(g),
   ambience: () => {
     audio.loop('amb', 'amb_town', 0.32, 3);
     audio.loop('wind', 'amb_wind', 0.45, 3);

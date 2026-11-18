@@ -59,10 +59,11 @@ export class Box extends Entity {
     s.x = b.x - b.w / 2;
     s.y = b.y - b.h;
   }
+  floating = false;
   /** 수평으로 밀기: 실제 이동량 반환 */
   push(dx: number, solids: Solid[]) {
     const x0 = this.body.x;
-    if (!this.body.onGround) return 0;
+    if (!this.body.onGround && !this.floating) return 0;
     moveBody(this.body, dx, 0, solids, { ignore: this });
     this.sync();
     const d = this.body.x - x0;
@@ -71,11 +72,26 @@ export class Box extends Entity {
   }
   update(g: GameAPI, dt: number) {
     const b = this.body;
-    b.vy = Math.min(1400, b.vy + 2500 * dt);
+    const w = g.waterAt(b.x);
+    const wasFloat = this.floating;
+    this.floating = !!w && b.y > w.level + 6;
+    if (w && this.floating) {
+      // 물에 뜬다. 위에 사람이 서 있으면 조금 더 가라앉는다
+      const pb = (g.player as unknown as { body: { onGround: boolean; groundSolid: unknown } }).body;
+      const rider = pb.onGround && pb.groundSolid === this.solid;
+      const target = w.level + this.size * 0.42 + (rider ? 18 : 0) + Math.sin(g.t * 1.6 + b.x) * 2;
+      b.vy += ((target - b.y) * 38 - b.vy * 7) * dt;
+      b.vy = clamp(b.vy, -320, 320);
+      if (!wasFloat && b.vy > 200) {
+        audio.play('splash1', { vol: 0.6 });
+        g.parts.puff(b.x, w.level, 10, 1);
+      }
+    } else b.vy = Math.min(1400, b.vy + 2500 * dt);
     const wasG = b.onGround;
     const solids = g.solids();
     moveBody(b, 0, b.vy * dt, solids, { ignore: this });
-    if (b.onGround) {
+    if (this.floating && b.onGround) b.vy = Math.min(0, b.vy);
+    if (b.onGround && !this.floating) {
       if (!wasG && b.vy > 300) {
         audio.play('thud', { vol: 0.6, vary: 0.05 });
         g.parts.puff(b.x, b.y, 10, 1.2);
@@ -87,7 +103,9 @@ export class Box extends Entity {
     // 끌리는 소리
     this.scrapeT -= dt;
     if (this.moved > 1 && this.scrapeT <= 0) {
-      audio.play(Math.random() < 0.5 ? 'scrape' : 'scrape2', { vol: 0.35, vary: 0.1 });
+      if (this.floating) audio.play('splash3', { vol: 0.25, vary: 0.15 });
+      else audio.play(Math.random() < 0.5 ? 'scrape' : 'scrape2', { vol: 0.35, vary: 0.1 });
+      g.noise(b.x, b.y, this.floating ? 380 : 560);
       this.scrapeT = 0.38;
     }
     this.moved = 0;
@@ -771,27 +789,6 @@ export class Faller extends Entity {
     this.ang = 0;
     this.vel = 0;
     this.solid = null;
-  }
-}
-
-export function createEntity(def: EntityDef): Entity {
-  switch (def.type) {
-    case 'box':
-      return new Box(def.id, def.x, def.y ?? 0, def.size);
-    case 'plate':
-      return new Plate(def.id, def.x, def.y ?? 0, def.w ?? 120, def.signal);
-    case 'gate':
-      return new Gate(def.id, def.x, def.y ?? 0, def.w ?? 46, def.h ?? 300, def.signal);
-    case 'resident':
-      return new Resident(def);
-    case 'petal':
-      return new PetalPickup(def.id, def.x, def.y, def.color);
-    case 'memory':
-      return new Memory(def.id, def.x, def.y ?? 0, def.art);
-    case 'cctv':
-      return new Cctv(def);
-    case 'faller':
-      return new Faller(def);
   }
 }
 

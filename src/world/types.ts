@@ -48,7 +48,15 @@ export type EntityDef =
   | { type: 'petal'; id: string; x: number; y: number; color: string }
   | { type: 'memory'; id: string; x: number; y?: number; art: string }
   | { type: 'cctv'; id: string; x: number; y: number; mid: number; amp: number; period: number; phase?: number; len?: number; half?: number; pole?: boolean }
-  | { type: 'faller'; id: string; x: number; h: number; dir: 1 | -1; trigger: number; icon?: IconName };
+  | { type: 'faller'; id: string; x: number; h: number; dir: 1 | -1; trigger: number; icon?: IconName }
+  /** 물: x0~x1, 바닥 floor, 수면 low/high (신호가 켜지면 high) */
+  | { type: 'water'; id: string; x0: number; x1: number; floor: number; low: number; high?: number; signal?: string; speed?: number; start?: number }
+  | { type: 'lever'; id: string; x: number; y?: number; signal: string; on?: boolean }
+  | { type: 'ladder'; id: string; x: number; top: number; bottom: number }
+  /** 메아리: 소리로 사냥하는 하얀 존재 */
+  | { type: 'echo'; id: string; x: number; y?: number; x0: number; x1: number; hunt?: boolean; dormant?: boolean }
+  /** 천장 격자로 들어오는 빛줄기 */
+  | { type: 'shaft'; id: string; x: number; w?: number; top?: number; bright?: number };
 
 export interface TriggerDef {
   id: string;
@@ -85,6 +93,13 @@ export interface LevelDef {
   camZones: CamZone[];
   scripts: Record<string, (g: GameAPI) => Co>;
   ambience: () => void;
+  /** 어둠 정도 (0 = 밝음, 1 = 완전한 어둠). 꽃이 빛을 낸다 */
+  dark?: number;
+  /** 이 구간을 처음 시작할 때의 위치 (기본 spawn) */
+  startScript?: string;
+  /** 천장에서 물방울이 떨어진다 */
+  drips?: boolean;
+  customPrompt?: (g: GameAPI) => { text: string; x: number; y: number; act: () => void } | null;
 }
 
 /** 엔티티/스크립트가 사용하는 게임 인터페이스 */
@@ -103,7 +118,12 @@ export interface GameAPI {
   solids(): Solid[];
   entity<T = unknown>(id: string): T | undefined;
   hint(kb: string, touch?: string, dur?: number): void;
-  kill(cause: 'erase' | 'fall' | 'crush'): void;
+  kill(cause: 'erase' | 'fall' | 'crush' | 'drown'): void;
+  /** 소리를 낸다 (메아리가 듣는다) */
+  noise(x: number, y: number, r: number): void;
+  /** 해당 위치의 물 (없으면 null) */
+  waterAt(x: number, y?: number): { level: number; floor: number; x0: number; x1: number } | null;
+  goToLevel(id: string): void;
   shake(v: number): void;
   startChase(opts?: { speed?: number; startOffset?: number }): void;
   stopChase(): void;

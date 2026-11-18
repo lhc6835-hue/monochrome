@@ -24,7 +24,13 @@ export const PH = {
   SCALE: 150,
 };
 
-export type PState = 'normal' | 'mantle' | 'freeze' | 'slide' | 'give' | 'dead' | 'scripted';
+export type PState = 'normal' | 'mantle' | 'freeze' | 'slide' | 'give' | 'dead' | 'scripted' | 'climb';
+
+export interface LadderLike {
+  x: number;
+  top: number;
+  bottom: number;
+}
 
 export class Player implements PlayerLike {
   body = new Body(0, 0, PH.W, PH.H);
@@ -53,9 +59,14 @@ export class Player implements PlayerLike {
   scriptTarget: number | null = null;
   scriptSpeed = 200;
   deathT = 0;
-  deathCause: 'erase' | 'fall' | 'crush' = 'erase';
+  deathCause: 'erase' | 'fall' | 'crush' | 'drown' = 'erase';
   joints: Joints | null = null;
   hideFlower = false;
+  /** 물에 잠긴 정도 0..1 */
+  submerge = 0;
+  ladder: LadderLike | null = null;
+  private climbPhase = 0;
+  private hopT = 0;
   holdAnim = 0;
 
   get x() {
@@ -81,12 +92,12 @@ export class Player implements PlayerLike {
     this.fallStartY = y;
   }
 
-  update(g: GameAPI & { boxes(): Box[] }, inp: Input, control: boolean, dt: number) {
+  update(g: GameAPI & { boxes(): Box[]; ladders(): LadderLike[] }, inp: Input, control: boolean, dt: number) {
     const b = this.body;
     if (this.state === 'dead') {
       this.deathT += dt;
-      if (this.deathCause === 'fall') {
-        b.vy = Math.min(PH.MAX_FALL, b.vy + PH.GRAV * dt);
+      if (this.deathCause === 'fall' || this.deathCause === 'drown') {
+        b.vy = Math.min(this.deathCause === 'drown' ? 120 : PH.MAX_FALL, b.vy + PH.GRAV * dt);
         b.y += b.vy * dt;
       }
       return;
@@ -94,6 +105,69 @@ export class Player implements PlayerLike {
     let ax = control ? inp.axisX : 0;
     const downHeld = control && inp.down('down');
     const solids = g.solids();
+    // 물
+    const water = g.waterAt(b.x);
+    const prevSub = this.submerge;
+    this.submerge = water ? clamp((b.y - water.level) / PH.H) : 0;
+    const sub = this.submerge;
+    if (water && prevSub <= 0.02 && sub > 0.02 && b.vy > 150) {
+      audio.play(b.vy > 700 ? 'splash2' : 'splash1', { vol: clamp(b.vy / 900, 0.3, 0.9) });
+      g.parts.puff(b.x, water.level, 12, 1.3);
+      g.noise(b.x, b.y, 520);
+    }
+    this.hopT = Math.max(0, this.hopT - dt);
+
+    // ---------- 사다리 ----------
+    if (this.state === 'climb' && this.ladder) {
+      const L = this.ladder;
+      const upHeld = inp.down('up') || (inp.isTouch && inp.down('jump'));
+      const dir = (control && inp.down('down') ? 1 : 0) - (control && upHeld ? 1 : 0);
+      b.vx = 0;
+      b.vy = 0;
+      b.x = damp(b.x, L.x, 18, dt);
+      const ny = b.y + dir * 235 * dt;
+      const ph0 = this.climbPhase;
+      this.climbPhase += Math.abs(dir) * dt * 7.5;
+      if (Math.floor(ph0 / Math.PI) !== Math.floor(this.climbPhase / Math.PI)) {
+        audio.step(this.stepI++, 0.3, true);
+        g.noise(b.x, b.y, 300);
+      }
+      if (ny <= L.top) {
+        b.y = L.top;
+        this.state = 'normal';
+        b.onGround = true;
+        this.ladder = null;
+      } else if (ny >= L.bottom) {
+        b.y = L.bottom;
+        this.state = 'normal';
+        this.ladder = null;
+      } else b.y = ny;
+      if (control && ((inp.pressed('jump') && !inp.down('up') && !inp.isTouch) || (inp.isTouch && inp.axisX !== 0))) {
+        this.state = 'normal';
+        this.ladder = null;
+        b.vy = -520;
+        b.vx = inp.axisX * 260;
+      }
+      this.animate(g, dt);
+      return;
+    }
+    if (this.state === 'normal' && control && !this.grabbing) {
+      for (const L of g.ladders()) {
+        if (Math.abs(b.x - L.x) > 34) continue;
+        const onBody = b.y > L.top + 4 && b.y - b.h < L.bottom;
+        const atTop = Math.abs(b.y - L.top) < 6 && b.onGround;
+        if (((inp.down('up') || (inp.isTouch && inp.down('jump'))) && onBody) || (inp.down('down') && atTop)) {
+          this.state = 'climb';
+          this.ladder = L;
+          this.buffer = 0;
+          this.jumping = false;
+          if (atTop && inp.down('down')) b.y = L.top + 14;
+          audio.play('clunk', { vol: 0.3, rate: 1.4 });
+          this.animate(g, dt);
+          return;
+        }
+      }
+    }
 
     if (this.state === 'scripted') {
       ax = 0;
@@ -155,6 +229,7 @@ export class Player implements PlayerLike {
       b.h = PH.SLIDE_H;
       b.vx = Math.sign(b.vx) * Math.max(Math.abs(b.vx), 420);
       audio.play('swish2', { vol: 0.5 });
+      g.noise(b.x, b.y, 430);
       audio.play('scrape', { vol: 0.3, rate: 1.4 });
       g.parts.puff(b.x, b.y, 6, 0.8);
     }
@@ -193,7 +268,7 @@ export class Player implements PlayerLike {
     if (this.grabbing && !this.grabbing.body.onGround) this.grabbing = null;
 
     const pushingDir = this.pushing;
-    const maxSp = this.grabbing || pushingDir ? PH.PUSH : PH.RUN;
+    const maxSp = (this.grabbing || pushingDir ? PH.PUSH : PH.RUN) * (sub > 0.25 ? 0.6 : 1);
     if (this.state === 'normal' || this.state === 'scripted' || this.state === 'freeze' || this.state === 'give') {
       const target = ax * maxSp;
       const acc = b.onGround ? (ax !== 0 && Math.sign(ax) === Math.sign(b.vx || ax) ? PH.ACC_G : PH.FRIC) : PH.ACC_A;
@@ -213,21 +288,31 @@ export class Player implements PlayerLike {
           this.state = 'normal';
           b.h = PH.H;
         }
-        b.vy = -PH.JUMP;
+        b.vy = -PH.JUMP * (sub > 0.25 ? 0.7 : 1);
         this.jumping = true;
         this.buffer = 0;
         this.coyote = 0;
         this.grabbing = null;
         audio.play('swish1', { vol: 0.35, vary: 0.1 });
         audio.step(this.stepI++, 0.35);
+        g.noise(b.x, b.y, sub > 0.05 ? 420 : 260);
+        if (sub > 0.05) audio.play('splash3', { vol: 0.4 });
       }
+    } else if (control && inp.pressed('jump') && sub > 0.3 && sub < 0.8 && this.hopT <= 0 && this.state === 'normal') {
+      // 물속에서 가볍게 차오르기 (머리가 물 밖에 있을 때만)
+      b.vy = -600;
+      this.hopT = 0.5;
+      this.buffer = 0;
+      audio.play('splash3', { vol: 0.45 });
+      g.noise(b.x, b.y, 450);
     }
     if (this.jumping && b.vy < 0 && control && !inp.down('jump')) {
       b.vy *= 0.45;
       this.jumping = false;
     }
     if (b.vy >= 0) this.jumping = false;
-    b.vy = Math.min(PH.MAX_FALL, b.vy + PH.GRAV * dt);
+    if (sub > 0.3) b.vy = Math.min(230, b.vy + PH.GRAV * 0.45 * dt);
+    else b.vy = Math.min(PH.MAX_FALL, b.vy + PH.GRAV * dt);
 
     // ---------- 상자 밀기 ----------
     this.pushing = 0;
@@ -288,6 +373,7 @@ export class Player implements PlayerLike {
         this.mantleTo = [tx, s.y];
         this.facing = dir;
         audio.play('swish3', { vol: 0.3 });
+        g.noise(b.x, b.y, 260);
         audio.play('click4', { vol: 0.25 });
         break;
       }
@@ -301,6 +387,7 @@ export class Player implements PlayerLike {
         this.landSquash = clamp(v / 1400) * 0.22;
         g.parts.puff(b.x, b.y, Math.round(4 + v / 150), clamp(v / 1000, 0.5, 1.5));
         audio.play(v > 1100 ? 'land_hard' : 'land', { vol: clamp(v / 1200, 0.25, 0.9), vary: 0.08 });
+        g.noise(b.x, b.y, 200 + v * 0.35);
         if (v > 1100) g.shake(0.25);
       }
       void fall;
@@ -320,7 +407,7 @@ export class Player implements PlayerLike {
     this.body.vx = 0;
   }
 
-  die(cause: 'erase' | 'fall' | 'crush') {
+  die(cause: 'erase' | 'fall' | 'crush' | 'drown') {
     if (this.state === 'dead') return;
     this.state = 'dead';
     this.deathCause = cause;
@@ -339,12 +426,27 @@ export class Player implements PlayerLike {
     const ph0 = this.phase;
     if (b.onGround && sp > 10) this.phase += (sp * dt * Math.PI) / (this.pushing || this.grabbing ? 70 : 118);
     if (b.onGround && sp > 40 && Math.floor(ph0 / Math.PI) !== Math.floor(this.phase / Math.PI)) {
-      audio.step(this.stepI++, clamp(sp / PH.RUN, 0.15, 0.5));
+      const metal = (b.groundSolid as { look?: string } | null)?.look === 'pipe';
+      if (this.submerge > 0.03) audio.play('splash3', { vol: clamp(sp / PH.RUN, 0.15, 0.4), vary: 0.15, rate: 1.2 });
+      else audio.step(this.stepI++, clamp(sp / PH.RUN, 0.15, 0.5), metal);
+      g.noise(b.x, b.y, this.submerge > 0.03 ? 440 : metal ? 520 : 330);
     }
     this.landSquash = damp(this.landSquash, 0, 9, dt);
     this.idleT = sp < 5 && b.onGround ? this.idleT + dt : 0;
 
-    if (this.state === 'mantle') {
+    if (this.state === 'climb') {
+      const c = this.climbPhase;
+      P.turn = damp(prev.turn, 0, 12, dt);
+      P.arms[0].a = 2.5 + Math.sin(c) * 0.3;
+      P.arms[1].a = 2.5 - Math.sin(c) * 0.3;
+      P.arms[0].b = P.arms[1].b = 0.5;
+      P.legs[0].a = 0.25 + Math.max(0, Math.sin(c)) * 0.5;
+      P.legs[1].a = 0.25 + Math.max(0, -Math.sin(c)) * 0.5;
+      P.legs[0].b = 0.3 + Math.max(0, Math.sin(c)) * 0.9;
+      P.legs[1].b = 0.3 + Math.max(0, -Math.sin(c)) * 0.9;
+      this.pose = P;
+      return;
+    } else if (this.state === 'mantle') {
       const k = clamp(this.mantleT);
       P.turn = this.facing;
       const near = this.facing > 0 ? 0 : 1;

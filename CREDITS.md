@@ -23,7 +23,14 @@
 | land, land_hard, thud, metal_fall, glass_break | 75 CC0 breaking / falling / hit sfx | rubberduck |
 | scrape, scrape2 | Scrapes | — |
 | click1~5 | 10 Clicks and Switches | — |
-| lever, clank, clunk | Mechanical Sounds | — |
+| lever, clank, clunk, valve, rattle | Mechanical Sounds | — |
+| amb_drain | Dripping water loop | — |
+| amb_dungeon | Loopable Dungeon Ambience | — |
+| amb_rumble | underwater or space engine rumble | — |
+| drip1~2 | Water Drops | — |
+| splash1~3, bubble1~2, water_loop | 40 CC0 water / splash / slime SFX | rubberduck |
+| mstep1~4 | Metal footsteps on concrete | thimras |
+| machine | 100 CC0 SFX | rubberduck |
 
 모든 소리는 잘라내기 / 음량 정규화(ffmpeg loudnorm) / MP3 변환을 거쳤습니다.
 

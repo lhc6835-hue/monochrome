@@ -70,7 +70,46 @@ function gardenArt(): Stroke[] {
   return S;
 }
 
-const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt };
+function givingArt(): Stroke[] {
+  const S: Stroke[] = [];
+  S.push({ pts: [[-430, 190], [-100, 186], [200, 192], [430, 188]], color: GRAY, w: 5 });
+  // 정원사 (키가 크다)
+  S.push({ pts: circle(-250, -150, 40), color: DARK, w: 5 });
+  S.push({ pts: [[-250, -110], [-252, 70]], color: DARK, w: 6 });
+  S.push({ pts: [[-252, 70], [-290, 186]], color: DARK, w: 6 });
+  S.push({ pts: [[-252, 70], [-214, 186]], color: DARK, w: 6 });
+  S.push({ pts: [[-251, -60], [-310, 10]], color: DARK, w: 6 });
+  S.push({ pts: [[-251, -60], [-170, -40], [-120, -20]], color: DARK, w: 6 });
+  // 손에 든 꽃: 꽃잎이 두 장밖에 남지 않았다
+  S.push({ pts: [[-118, -20], [-112, -90]], color: STEM, w: 4 });
+  S.push({ pts: circle(-124, -100, 11, 8), color: PETAL_COLORS[0], w: 5, fill: true });
+  S.push({ pts: circle(-100, -96, 11, 8), color: PETAL_COLORS[4], w: 5, fill: true });
+  // 줄 선 사람들: 울고 있다, 가슴에 꽃잎 하나씩
+  for (let i = 0; i < 4; i++) {
+    const x = -10 + i * 105;
+    const hgt = i === 2 ? 0.7 : 1;
+    const top = 186 - 230 * hgt;
+    S.push({ pts: circle(x, top + 28 * hgt, 26 * hgt), color: DARK, w: 5 });
+    S.push({ pts: [[x, top + 54 * hgt], [x, top + 160 * hgt]], color: DARK, w: 5 });
+    S.push({ pts: [[x, top + 160 * hgt], [x - 20, 186]], color: DARK, w: 5 });
+    S.push({ pts: [[x, top + 160 * hgt], [x + 20, 186]], color: DARK, w: 5 });
+    S.push({ pts: [[x, top + 80 * hgt], [x - 28, top + 130 * hgt]], color: DARK, w: 5 });
+    S.push({ pts: [[x, top + 80 * hgt], [x + 28, top + 130 * hgt]], color: DARK, w: 5 });
+    S.push({ pts: circle(x, top + 95 * hgt, 7, 8), color: PETAL_COLORS[(i * 2 + 1) % 7], w: 4, fill: true });
+    // 눈물
+    S.push({ pts: [[x - 8, top + 36 * hgt], [x - 10, top + 52 * hgt]], color: '#8fb3e0', w: 3 });
+    S.push({ pts: [[x + 8, top + 36 * hgt], [x + 10, top + 52 * hgt]], color: '#8fb3e0', w: 3 });
+  }
+  // 뒤쪽의 시든 꽃밭 (회색)
+  for (let i = 0; i < 9; i++) {
+    const x = -420 + i * 100 + hash1(i) * 30;
+    S.push({ pts: [[x, -230], [x + 10, -200], [x + 4, -170]], color: '#a2a29e', w: 3 });
+    S.push({ pts: circle(x - 6, -236, 9, 8), color: '#a2a29e', w: 3 });
+  }
+  return S;
+}
+
+const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt };
 const cache = new Map<string, Stroke[]>();
 
 export function drawMemory(s: Screen, art: string, t: number, alpha: number) {

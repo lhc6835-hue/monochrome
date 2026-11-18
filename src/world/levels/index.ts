@@ -2,8 +2,9 @@ import type { LevelDef } from '../types';
 import { town } from './town';
 import { drain } from './drain';
 import { factory } from './factory';
+import { rail } from './rail';
 
 /** 이어지는 순서 (세계는 하나, 구간은 개발용 구분) */
-export const LEVEL_ORDER = ['town', 'drain', 'factory'] as const;
+export const LEVEL_ORDER = ['town', 'drain', 'factory', 'rail'] as const;
 
-export const LEVELS: Record<string, LevelDef> = { town, drain, factory };
+export const LEVELS: Record<string, LevelDef> = { town, drain, factory, rail };

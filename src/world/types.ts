@@ -68,7 +68,11 @@ export type EntityDef =
   /** 추격전: 천장 레일을 타고 쫓아오는 거대한 도장 */
   | { type: 'giant'; id: string; x: number; rail: number; floor: number }
   /** 화물열차 (마지막에 뛰어오른다) */
-  | { type: 'train'; id: string; x: number; y: number };
+  | { type: 'train'; id: string; x: number; y: number }
+  /** 열차 칸 (그림만, 충돌은 레벨의 solids 로) */
+  | { type: 'car'; id: string; x: number; w: number; kind: 'box' | 'flat' | 'container' | 'passenger' | 'tender' | 'loco' }
+  /** 열차를 스쳐 지나가는 것들: 머리 높이 빔, 철교 하단 철골, 터널, 끊긴 다리 */
+  | { type: 'hazard'; id: string; kind: 'beam' | 'bar' | 'tunnel' | 'cliff'; w?: number };
 
 export interface TriggerDef {
   id: string;
@@ -112,6 +116,14 @@ export interface LevelDef {
   startScript?: string;
   /** 천장에서 물방울이 떨어진다 */
   drips?: boolean;
+  /** 달리는 열차 위: 배경이 trainSpeed 로 흘러간다 */
+  moving?: boolean;
+  /** 장식 뒤, 고체 앞에 그리는 구간 고유 그림 (선로 등) */
+  drawBack?: (ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1: number; y0: number; y1: number }) => void;
+  /** 바람/위험을 피할 수 있는 곳 (열차 칸 안 등) */
+  sheltered?: (x: number, y: number) => boolean;
+  /** 체크포인트에서 다시 시작할 때 */
+  onRestore?: (g: GameAPI) => void;
   customPrompt?: (g: GameAPI) => { text: string; x: number; y: number; act: () => void } | null;
 }
 
@@ -137,8 +149,16 @@ export interface GameAPI {
   /** 해당 위치의 물 (없으면 null) */
   waterAt(x: number, y?: number): { level: number; floor: number; x0: number; x1: number } | null;
   goToLevel(id: string): void;
+  /** 달리는 열차 속도 (배경과 지나가는 장애물이 이 속도로 흐른다) */
+  trainSpeed: number;
+  /** 바람 (x 방향 속도, 음수 = 뒤로 밀림) */
+  wind: number;
+  windAt(x: number, y: number): number;
+  /** 잠깐 어두워지기 (터널) 0..1 */
+  darkBoost: number;
+  sheltered(x: number, y: number): boolean;
   shake(v: number): void;
-  startChase(opts?: { speed?: number; startOffset?: number }): void;
+  startChase(opts?: { speed?: number; startOffset?: number; max?: number }): void;
   stopChase(): void;
   chaseActive(): boolean;
   setControl(on: boolean): void;

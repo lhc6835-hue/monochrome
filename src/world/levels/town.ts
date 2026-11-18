@@ -143,7 +143,7 @@ const triggers: TriggerDef[] = [
   { id: 'h_freeze', x: 5330, w: 120, once: true, hint: { kb: '{down} 를 누르고 있으면 굳는다  ·  감시의 눈은 움직이는 것만 본다', touch: '굳기 버튼을 누르고 있으면 굳는다  ·  감시의 눈은 움직이는 것만 본다', dur: 6 } },
   { id: 'cp_e', x: 7330, w: 80, checkpoint: true, spawnX: 7360 },
   { id: 'chase', x: 7620, w: 60, once: true, script: 'chase' },
-  { id: 'h_slide', x: 8700, w: 60, once: true, hint: { kb: '달리면서 {down}   미끄러지기', touch: '달리면서 굳기 버튼   미끄러지기', dur: 2.2 } },
+  { id: 'h_slide', x: 8700, w: 60, once: true, hint: { kb: '달리면서 {down}   구르기', touch: '달리면서 굳기 버튼   구르기', dur: 2.2 } },
   { id: 'end', x: 10760, w: 200, y: 20, h: 800, once: true, script: 'end' },
 ];
 

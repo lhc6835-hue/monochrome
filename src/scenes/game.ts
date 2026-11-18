@@ -76,7 +76,12 @@ export class GameScene implements Scene, GameAPI {
   private hintText = '';
   private hintT = 0;
   private hintDur = 0;
-  chase = { active: false, front: 0, speed: 0, t: 0 };
+  chase = { active: false, front: 0, speed: 0, t: 0, max: 318 };
+  trainSpeed = 0;
+  travel = 0;
+  wind = 0;
+  darkBoost = 0;
+  private darkNow = 0;
   promptActive = false;
   private prompt: { p: Prompt; x: number; y: number; act: () => void } | null = null;
   private holdT = 0;
@@ -153,6 +158,7 @@ export class GameScene implements Scene, GameAPI {
       this.snapSaved = [...this.saved];
       this.snapMem = [...this.memories];
       if (this.carry) this.persist();
+      this.level.onRestore?.(this);
       const st = this.level.startScript;
       if (!useX && st && this.level.scripts[st]) this.co.run(this.level.scripts[st](this), st);
       // ?x 로 시작하면 지나온 트리거는 발동된 것으로
@@ -237,18 +243,65 @@ export class GameScene implements Scene, GameAPI {
       audio.play('sting4', { vol: 0.4 });
     } else if (cause === 'crush') {
       audio.play('land_hard', { vol: 1 });
-      audio.play('sting3', { vol: 0.6 });
-      this.shake(0.7);
+      audio.play('slam', { vol: 0.8, rate: 0.8 });
+      audio.play('glass_break', { vol: 0.55, rate: 0.6 });
+      audio.play('sting3', { vol: 0.5 });
+      this.shake(0.8);
+      this.burstPlayer();
     } else {
       audio.play('sting4', { vol: 0.5 });
     }
     audio.muffle(0.6, 0.4);
   }
+  /** 깔렸을 때: 몸이 픽토그램 조각으로 터져 흩어진다 */
+  private burstPlayer() {
+    const p = this.player;
+    const b = p.body;
+    const S = PH.SCALE;
+    const cx = b.x,
+      cy = b.y - S * 0.55;
+    const floor = b.y;
+    const j = p.joints;
+    const pieces: [number, number, number, number][] = [
+      // x, y, 길이, 두께
+      [j ? j.head[0] : cx, j ? j.head[1] : b.y - S * 0.9, S * 0.19, S * 0.19],
+      [cx, b.y - S * 0.58, S * 0.3, S * 0.22],
+      [cx - 12, b.y - S * 0.56, S * 0.33, S * 0.079],
+      [cx + 12, b.y - S * 0.56, S * 0.33, S * 0.079],
+      [cx - 9, b.y - S * 0.2, S * 0.36, S * 0.105],
+      [cx + 9, b.y - S * 0.2, S * 0.36, S * 0.105],
+    ];
+    for (const [x, y, len, w] of pieces) {
+      const a = Math.atan2(y - cy, x - cx + rand(-6, 6));
+      const sp = rand(380, 720);
+      this.parts.add({ t: 'shard', x, y, vx: Math.cos(a) * sp + rand(-120, 120), vy: Math.sin(a) * sp - rand(380, 620), life: rand(1.8, 2.4), size: len, w, rot: rand(0, 6), vr: rand(-14, 14), color: '#0e0e0e', drag: 0.4, g: 2000, floor: floor - w / 2 });
+    }
+    // 잘게 부서진 조각과 먹물
+    for (let i = 0; i < 26; i++) {
+      const a = rand(-Math.PI, 0);
+      const sp = rand(200, 820);
+      const small = i < 10;
+      this.parts.add({ t: small ? 'shard' : 'ink', x: cx + rand(-14, 14), y: cy + rand(-40, 40), vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 150, life: rand(0.9, 1.7), size: small ? rand(8, 16) : rand(3, 7), w: small ? rand(5, 9) : undefined, rot: rand(0, 6), vr: rand(-18, 18), color: '#111', drag: 0.8, g: 1900, floor: floor - 3 });
+    }
+    // 손에 든 꽃도 흩어진다
+    if (this.petals.length) {
+      const hx = j ? j.hand[j.near][0] : cx,
+        hy = j ? j.hand[j.near][1] : cy;
+      this.parts.burst(hx, hy - 20, this.petals, 18, 520);
+      this.parts.ring(hx, hy - 20, this.petals[this.petals.length - 1], 90, 0.4);
+    }
+  }
   shake(v: number) {
     this.cam.addShake(v);
   }
-  startChase(o: { speed?: number; startOffset?: number } = {}) {
-    this.chase = { active: true, front: this.player.x + (o.startOffset ?? -900), speed: o.speed ?? 0, t: 0 };
+  windAt(x: number, y: number) {
+    return this.wind && !this.sheltered(x, y) ? this.wind : 0;
+  }
+  sheltered(x: number, y: number) {
+    return this.level.sheltered?.(x, y) ?? false;
+  }
+  startChase(o: { speed?: number; startOffset?: number; max?: number } = {}) {
+    this.chase = { active: true, front: this.player.x + (o.startOffset ?? -900), speed: o.speed ?? 0, t: 0, max: o.max ?? 318 };
   }
   stopChase() {
     if (!this.chase.active) return;
@@ -361,6 +414,9 @@ export class GameScene implements Scene, GameAPI {
     this.erased.clear();
     this.control = true;
     this.solidCache = null;
+    this.wind = 0;
+    this.darkBoost = 0;
+    this.level.onRestore?.(this);
     this.level.ambience();
     audio.muffle(0, 0.8);
     this.snapCamera();
@@ -419,6 +475,7 @@ export class GameScene implements Scene, GameAPI {
     this.dt = dt;
     this.t += dt;
     this.playTime += dt;
+    this.travel += this.trainSpeed * dt;
     this.fadeA = Math.max(0, this.fadeA - dt / (this.fadeColor === '#000' ? 1.4 : 0.9));
     this.hintT += dt;
     this.cpFlash = Math.max(0, this.cpFlash - dt);
@@ -633,12 +690,13 @@ export class GameScene implements Scene, GameAPI {
     if (!c.active) return;
     c.t += dt;
     const p = this.player;
-    const base = c.t < 1.7 ? 70 : Math.min(318, 140 + (c.t - 1.7) * 160);
+    const base = c.t < 1.7 ? 70 : Math.min(c.max, 140 + (c.t - 1.7) * 160);
     const gap = p.x - c.front;
     let sp = base;
     if (gap > 1000) sp = 560;
     else if (gap > 780) sp = base * 1.25;
     if (this.mode === 'dying') sp = 160;
+    if (c.max <= 0) sp = 0;
     c.front += sp * dt;
     if (gap < 26 && p.state !== 'dead') this.kill('erase');
     // 지워지는 주민들
@@ -820,11 +878,20 @@ export class GameScene implements Scene, GameAPI {
     const ctx = s.ctx;
     const cam = this.cam;
     drawSky(ctx, s, this.theme);
-    drawLayers(ctx, s, cam, this.theme);
+    if (this.level.moving) {
+      // 열차가 달린다: 배경만 이동 거리만큼 밀어서 그린다
+      const bg = Object.assign(Object.create(Object.getPrototypeOf(cam)), cam) as Camera;
+      bg.x = cam.x + this.travel;
+      drawLayers(ctx, s, bg, this.theme);
+    } else drawLayers(ctx, s, cam, this.theme);
 
     cam.apply(ctx, s, 1);
     const v = cam.view(s);
     // 장식 (뒤)
+    if (this.level.drawBack) {
+      cam.apply(ctx, s, 1);
+      this.level.drawBack(ctx, this, v);
+    }
     for (const d of this.level.decor) {
       if (d.layer === 'front') continue;
       if (d.x + d.h < v.x0 || d.x - d.h > v.x1) continue;
@@ -868,7 +935,8 @@ export class GameScene implements Scene, GameAPI {
     cam.apply(ctx, s, 1);
     this.parts.render(ctx);
 
-    if (this.level.dark) this.drawDarkness(this.level.dark);
+    this.darkNow = damp(this.darkNow, Math.max(this.level.dark ?? 0, this.darkBoost), 6, dt);
+    if (this.darkNow > 0.01) this.drawDarkness(this.darkNow);
 
     // 근경
     cam.apply(ctx, s, 1.3);
@@ -1255,6 +1323,7 @@ export class GameScene implements Scene, GameAPI {
       town: '어둠 속에서도, 손에 든 꽃은 빛나고 있었다.',
       drain: '위에서 기계 소리가 들려왔다. 쿵, 쿵, 쿵.',
       factory: '기차는 회색 들판을 가로질러 달렸다.',
+      rail: '끊어진 다리 너머에는, 끝없는 서가가 있었다.',
     };
     line(closing[this.level.id] ?? '', s.H * 0.38, 2.0, 26);
     line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${this.memories.size} / ${mems}`, s.H * 0.5, 4.0, 19, '#8d8d8a');

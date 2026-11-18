@@ -27,6 +27,13 @@ export const PH = {
 /** 사다리 가로대 간격, 한 칸 오르는 시간 */
 export const RUNG = 34;
 const CLIMB_STEP = 0.19;
+/** 구르기 한 바퀴 시간 */
+const ROLL_T = 0.5;
+/** 웅크린 몸 중심 (발 기준) */
+const ROLL_CY = 40;
+const ROLL_DX = 33;
+const ROLL_DY = 14;
+const ROLL_SCALE = 0.88;
 
 export type PState = 'normal' | 'mantle' | 'freeze' | 'slide' | 'give' | 'dead' | 'scripted' | 'climb';
 
@@ -59,6 +66,11 @@ export class Player implements PlayerLike {
   private blendFrom: Pose | null = null;
   private blendT = 1;
   private blendDur = 0.1;
+  /** 구르기 */
+  private rollEnd = 0;
+  private rollDir = 1;
+  rollAngle = 0;
+  rollK = 0;
   /** 사다리: 가로대 단위 이동 */
   private climbM = 0;
   private climbE = 0;
@@ -277,29 +289,31 @@ export class Player implements PlayerLike {
       if (this.giveT > 1.25) this.state = 'normal';
     }
 
-    // ---------- 미끄러지기 ----------
+    // ---------- 구르기 (달리면서 ↓) ----------
     if (this.state === 'normal' && b.onGround && control && inp.pressed('down') && Math.abs(b.vx) > 230) {
       this.state = 'slide';
       this.slideT = 0;
+      this.rollEnd = ROLL_T;
+      this.rollDir = Math.sign(b.vx);
       b.h = PH.SLIDE_H;
       b.vx = Math.sign(b.vx) * Math.max(Math.abs(b.vx), 420);
-      audio.play('swish2', { vol: 0.5 });
+      audio.play('swish2', { vol: 0.5, rate: 0.85 });
+      audio.play('land', { vol: 0.25, rate: 1.3 });
       g.noise(b.x, b.y, 430);
-      audio.play('scrape', { vol: 0.3, rate: 1.4 });
       g.parts.puff(b.x, b.y, 6, 0.8);
     }
     if (this.state === 'slide') {
       this.slideT += dt;
       ax = 0;
-      const canStand = areaFree({ x: b.x - b.w / 2, y: b.y - PH.H, w: b.w, h: PH.H - 2 }, solids);
-      b.vx = Math.sign(b.vx || this.facing) * Math.max(180, Math.abs(b.vx) - 520 * dt);
-      if (this.slideT > 0.55 && canStand) {
-        this.state = 'normal';
-        b.h = PH.H;
-      }
-      if (!b.onGround && this.slideT > 0.1 && canStand) {
-        this.state = 'normal';
-        b.h = PH.H;
+      b.vx = Math.sign(b.vx || this.facing) * Math.max(200, Math.abs(b.vx) - 440 * dt);
+      // 한 바퀴를 다 돌았을 때만 일어선다 (낮은 곳 아래면 한 바퀴 더)
+      if (this.slideT >= this.rollEnd) {
+        const canStand = areaFree({ x: b.x - b.w / 2, y: b.y - PH.H, w: b.w, h: PH.H - 2 }, solids);
+        if (canStand) {
+          this.state = 'normal';
+          b.h = PH.H;
+          if (b.onGround) audio.play('step2', { vol: 0.35 });
+        } else this.rollEnd += ROLL_T;
       }
     }
 
@@ -331,6 +345,9 @@ export class Player implements PlayerLike {
       else if (b.vx > target) b.vx = Math.max(target, b.vx - acc * dt);
       if (ax !== 0 && !this.grabbing) this.facing = Math.sign(ax);
     }
+    // 바람: 굳어 있으면 버틴다
+    const wind = this.state === 'freeze' ? 0 : g.windAt(b.x, b.y - 70);
+    if (wind && this.state !== 'climb') moveBody(b, wind * dt * (b.onGround ? 1 : 0.7), 0, g.solids());
 
     // ---------- 점프 ----------
     this.coyote = b.onGround ? PH.COYOTE : Math.max(0, this.coyote - dt);
@@ -537,21 +554,16 @@ export class Player implements PlayerLike {
       P.crouch = 0.04 * Math.sin(k * Math.PI);
     } else if (this.state === 'slide') {
       key = 'slide';
-      P.turn = this.facing;
-      const near = this.facing > 0 ? 0 : 1;
-      const far = 1 - near;
-      P.crouch = 0.27;
-      P.lean = -0.55;
-      P.legs[near].a = 1.45;
-      P.legs[near].b = 0.15;
-      P.legs[far].a = 1.05;
-      P.legs[far].b = 1.25;
-      P.arms[near].a = -0.9;
-      P.arms[near].b = 0.4;
-      P.arms[far].a = 1.1;
-      P.arms[far].b = 0.6;
-      P.headTilt = 0.3;
-      P.squash = 0.86;
+      // 몸을 공처럼 만다
+      // 다리 각도는 수직 기준이라, 몸통 기울기만큼 빼서 무릎을 가슴 쪽으로 당긴다
+      P.turn = this.rollDir;
+      P.crouch = 0.25;
+      P.lean = 1.2;
+      P.legs[0].a = P.legs[1].a = Math.PI - 1.2 - 0.3;
+      P.legs[0].b = P.legs[1].b = 2.8;
+      P.arms[0].a = P.arms[1].a = 1.2;
+      P.arms[0].b = P.arms[1].b = 0.9;
+      P.headTilt = 0.7;
     } else if (!b.onGround) {
       key = 'air';
       P.turn = this.facing;
@@ -640,9 +652,21 @@ export class Player implements PlayerLike {
       P.eye = 1 - k;
       if (this.freezeAmt < 1 && this.freezeAmt > 0.2) P.headX += Math.sin(g.t * 80) * 0.004;
     }
+    // 구르기 회전: 한 바퀴 안에서 천천히 시작해 천천히 멈춘다
+    if (this.state === 'slide') {
+      const turns = this.slideT / ROLL_T;
+      const n = Math.floor(turns);
+      this.rollAngle = this.rollDir * Math.PI * 2 * (n + ease.inOutSine(turns - n));
+      this.rollK = damp(this.rollK, 1, 30, dt);
+    } else {
+      const TW = Math.PI * 2;
+      this.rollAngle -= Math.round(this.rollAngle / TW) * TW;
+      this.rollAngle = damp(this.rollAngle, 0, 16, dt);
+      this.rollK = damp(this.rollK, 0, 16, dt);
+    }
     // 상태가 바뀌면 이전 자세에서 이어진다
     if (key !== this.poseKey) {
-      const durs: Record<string, number> = { ground: this.poseKey === 'climb' ? 0.22 : 0.09, air: 0.08, climb: 0.2, mantle: 0.07, slide: 0.07 };
+      const durs: Record<string, number> = { ground: this.poseKey === 'climb' ? 0.22 : this.poseKey === 'slide' ? 0.14 : 0.09, air: this.poseKey === 'slide' ? 0.12 : 0.08, climb: 0.2, mantle: 0.07, slide: 0.08 };
       this.blendFrom = clonePose(prev);
       this.blendT = 0;
       this.blendDur = durs[key] ?? 0.1;
@@ -718,6 +742,8 @@ export class Player implements PlayerLike {
   }
 
   draw(ctx: CanvasRenderingContext2D, g: GameAPI, petals: string[]) {
+    // 깔려서 터졌다: 몸은 조각(파티클)으로만 남는다
+    if (this.state === 'dead' && this.deathCause === 'crush') return;
     const b = this.body;
     const st = defaultStyle();
     if (this.state === 'dead') {
@@ -726,13 +752,27 @@ export class Player implements PlayerLike {
         st.color = lerpColor('#0e0e0e', '#f6f5f1', k);
         st.farColor = st.color;
         st.alpha = 1 - clamp((this.deathT - 0.5) / 0.6);
-      } else if (this.deathCause === 'crush') {
-        this.pose.squash = lerp(1, 0.25, ease.outCubic(k));
       }
     }
     const hide = this.freezeAmt > 0.5 || this.hideFlower;
     const fsize = 22;
-    this.joints = drawFigure(ctx, this.pose, b.x, b.y, PH.SCALE, st, {
+    // 구르기: 웅크린 몸의 중심을 축으로 회전
+    const rk = this.rollK,
+      ra = this.rollAngle;
+    const rolling = rk > 0.01 || Math.abs(ra) > 0.01;
+    let fx = b.x,
+      fy = b.y;
+    if (rolling) {
+      const cx = b.x,
+        cy = b.y - ROLL_CY;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(ra);
+      ctx.translate(-cx, -cy);
+      fx = b.x - this.rollDir * ROLL_DX * rk;
+      fy = b.y + ROLL_DY * rk;
+    }
+    this.joints = drawFigure(ctx, this.pose, fx, fy, PH.SCALE * (1 - (1 - ROLL_SCALE) * rk), st, {
       heldBehind: hide,
       held:
         petals.length > 0 && !(this.state === 'dead' && this.deathCause === 'erase')
@@ -743,12 +783,13 @@ export class Player implements PlayerLike {
             }
           : undefined,
     });
+    if (rolling) ctx.restore();
   }
 
   /** 꽃 빛 (인물 레이어 아래에 깔린다) */
   drawGlow(ctx: CanvasRenderingContext2D, petals: string[]) {
     if (!this.joints || this.freezeAmt > 0.5 || petals.length === 0) return;
-    if (this.state === 'dead' && this.deathCause === 'erase') return;
+    if (this.state === 'dead' && (this.deathCause === 'erase' || this.deathCause === 'crush')) return;
     const [hx, hy] = this.joints.hand[this.joints.near];
     drawGlow(ctx, hx, hy - 26, 120 + petals.length * 10, petals, 0.7);
   }

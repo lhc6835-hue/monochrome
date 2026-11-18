@@ -21,6 +21,8 @@ export interface BgLayer {
   band?: string;
   /** 이 레이어 위에 덮는 안개 */
   haze?: number;
+  /** 반복 간격 (끝없이 흘러가는 배경) */
+  wrap?: number;
 }
 
 export interface BgTheme {
@@ -107,9 +109,13 @@ export function drawLayers(ctx: CanvasRenderingContext2D, s: Screen, cam: Camera
   for (const L of th.layers) {
     cam.apply(ctx, s, L.p);
     const v = cam.view(s, L.p);
-    for (const it of L.items) {
-      if (it.x + it.h < v.x0 || it.x - it.h > v.x1) continue;
-      drawIcon(ctx, it.icon, it.x, L.ground + (it.y ?? 0), it.h, { color: L.color, flip: it.flip, sx: it.sx });
+    const reps = L.wrap ? [Math.floor(v.x0 / L.wrap) * L.wrap, (Math.floor(v.x0 / L.wrap) + 1) * L.wrap] : [0];
+    for (const off of reps) {
+      for (const it of L.items) {
+        const ix = it.x + off;
+        if (ix + it.h < v.x0 || ix - it.h > v.x1) continue;
+        drawIcon(ctx, it.icon, ix, L.ground + (it.y ?? 0), it.h, { color: L.color, flip: it.flip, sx: it.sx });
+      }
     }
     if (L.band) {
       ctx.fillStyle = L.band;
@@ -190,4 +196,41 @@ export function factoryTheme(width: number, seed = 33): BgTheme {
     }),
   };
   return { skyTop: '#8a8985', skyMid: '#a9a8a3', skyBot: '#9f9e99', layers: [far, mid] };
+}
+
+/** 회색 들판 (달리는 열차에서 본 풍경, 끝없이 반복) */
+export function fieldTheme(seed = 44): BgTheme {
+  const rng = mulberry32(seed);
+  const pick = <T>(a: T[]) => a[Math.floor(rng() * a.length)];
+  const span = 6000;
+  const far: BgLayer = {
+    p: 0.06,
+    color: '#bdbcb7',
+    ground: 20,
+    band: '#bdbcb7',
+    wrap: span,
+    items: scatter(rng, 0, span, 300, 900, (x) => ({ icon: pick<IconName>(['radioTower', 'industry', 'pine2', 'radioTower']), x, h: 160 + rng() * 260 })),
+  };
+  const mid: BgLayer = {
+    p: 0.25,
+    color: '#9a9994',
+    ground: 60,
+    band: '#9a9994',
+    wrap: span,
+    items: scatter(rng, 0, span, 260, 800, (x) => {
+      const r = rng();
+      if (r < 0.5) return { icon: pick<IconName>(['tree', 'pine', 'tree2']), x, h: 140 + rng() * 120, flip: rng() < 0.5 };
+      if (r < 0.75) return { icon: 'house', x, h: 120 + rng() * 80 };
+      return { icon: 'radioTower', x, h: 260 + rng() * 120 };
+    }),
+  };
+  const near: BgLayer = {
+    p: 0.6,
+    color: '#6f6e6a',
+    ground: 110,
+    band: '#5d5c58',
+    wrap: span,
+    items: scatter(rng, 0, span, 500, 1400, (x) => ({ icon: pick<IconName>(['pine', 'tree', 'signpost', 'lamp']), x, h: 160 + rng() * 140 })),
+  };
+  return { skyTop: '#a9a9a5', skyMid: '#d2d1cc', skyBot: '#c8c7c2', layers: [far, mid, near] };
 }

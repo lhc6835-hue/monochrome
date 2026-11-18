@@ -289,7 +289,7 @@ function drawSpaced(ctx: CanvasRenderingContext2D, text: string, cx: number, y: 
 // ------------------------------------------------------------------
 const BIND_ROWS: [Bindable, string][] = [
   ['interact', '행동 · 꽃잎 건네기 · 잡기'],
-  ['down', '굳기 · 미끄러지기'],
+  ['down', '굳기 · 구르기'],
   ['jump', '점프'],
   ['left', '왼쪽'],
   ['right', '오른쪽'],

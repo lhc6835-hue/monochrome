@@ -2,7 +2,7 @@ import { rand, TAU } from '../core/math';
 import { drawPetal } from './flower';
 import { drawPaperBit } from './blank';
 
-export type PType = 'dust' | 'ash' | 'petal' | 'paper' | 'ring' | 'puff' | 'spark';
+export type PType = 'dust' | 'ash' | 'petal' | 'paper' | 'ring' | 'puff' | 'spark' | 'shard' | 'ink';
 
 export interface Particle {
   t: PType;
@@ -18,6 +18,10 @@ export interface Particle {
   color: string;
   g: number;
   drag: number;
+  /** 조각 두께 (shard) */
+  w?: number;
+  /** 이 높이에서 튕긴다 */
+  floor?: number;
 }
 
 export class Particles {
@@ -120,6 +124,18 @@ export class Particles {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.rot += p.vr * dt;
+      if (p.floor !== undefined && p.y > p.floor) {
+        p.y = p.floor;
+        if (Math.abs(p.vy) > 80) {
+          p.vy *= -0.32;
+          p.vx *= 0.6;
+          p.vr *= 0.55;
+        } else {
+          p.vy = 0;
+          p.vx *= 0.85;
+          p.vr *= 0.8;
+        }
+      }
     }
   }
 
@@ -170,6 +186,27 @@ export class Particles {
         case 'paper':
           ctx.globalAlpha = 1;
           drawPaperBit(ctx, p.x, p.y, p.size, p.rot, Math.min(1, k * 2));
+          break;
+        case 'shard': {
+          // 픽토그램 조각 (머리 = 원, 팔다리/몸통 = 둥근 막대)
+          ctx.globalAlpha = Math.min(1, k * 3.5);
+          ctx.fillStyle = p.color;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot);
+          const w = p.w ?? p.size;
+          ctx.beginPath();
+          ctx.roundRect(-p.size / 2, -w / 2, p.size, w, Math.min(w, p.size) / 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case 'ink':
+          ctx.globalAlpha = Math.min(1, k * 2.5);
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.ellipse(p.x, p.y, p.size * (1 + Math.min(1.5, Math.abs(p.vx) / 600)), p.size, Math.atan2(p.vy, p.vx), 0, TAU);
+          ctx.fill();
           break;
       }
     }

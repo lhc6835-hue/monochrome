@@ -147,7 +147,37 @@ function factoryArt(): Stroke[] {
   return S;
 }
 
-const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt };
+function stationArt(): Stroke[] {
+  const S: Stroke[] = [];
+  // 승강장과 선로
+  S.push({ pts: [[-440, 120], [-120, 120], [-120, 190]], color: GRAY, w: 5 });
+  S.push({ pts: [[-440, 190], [440, 190]], color: GRAY, w: 5 });
+  // 떠나는 기차: 창문마다 사람, 가슴에 색
+  S.push({ pts: [[-60, 170], [-60, 0], [420, 0], [420, 170], [-60, 170]], color: DARK, w: 6 });
+  for (let i = 0; i < 4; i++) {
+    const x = -30 + i * 112;
+    S.push({ pts: [[x, 30], [x + 80, 30], [x + 80, 100], [x, 100], [x, 30]], color: DARK, w: 4 });
+    S.push({ pts: circle(x + 40, 54, 13, 10), color: DARK, w: 4 });
+    S.push({ pts: circle(x + 40, 86, 6, 8), color: PETAL_COLORS[(i * 2 + 2) % 7], w: 4, fill: true });
+  }
+  S.push({ pts: circle(20, 180, 14, 10), color: DARK, w: 5 });
+  S.push({ pts: circle(330, 180, 14, 10), color: DARK, w: 5 });
+  // 연기
+  S.push({ pts: [[400, -10], [420, -60], [400, -110], [430, -160]], color: GRAY, w: 6 });
+  // 승강장에 남은 정원사: 손을 흔든다, 꽃 없는 줄기
+  S.push({ pts: circle(-300, -90, 30), color: DARK, w: 5 });
+  S.push({ pts: [[-300, -60], [-300, 40]], color: DARK, w: 5 });
+  S.push({ pts: [[-300, 40], [-326, 118]], color: DARK, w: 5 });
+  S.push({ pts: [[-300, 40], [-274, 118]], color: DARK, w: 5 });
+  S.push({ pts: [[-300, -30], [-250, -80], [-236, -140]], color: DARK, w: 5 });
+  S.push({ pts: [[-244, -150], [-226, -130]], color: DARK, w: 3 });
+  S.push({ pts: [[-300, -30], [-340, 20]], color: DARK, w: 5 });
+  S.push({ pts: [[-340, 20], [-344, -20]], color: STEM, w: 4 });
+  S.push({ pts: [[-312, -86], [-314, -70]], color: '#8fb3e0', w: 3 });
+  return S;
+}
+
+const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt, station: stationArt };
 const cache = new Map<string, Stroke[]>();
 
 export function drawMemory(s: Screen, art: string, t: number, alpha: number) {

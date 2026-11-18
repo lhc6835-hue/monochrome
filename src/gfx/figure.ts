@@ -130,6 +130,9 @@ const HEAD_Y = -0.486;
 const HEAD_R = 0.094;
 const YOKE_TOP = -0.373;
 const YOKE_BOT = -0.262;
+/** 옆모습 몸통의 반폭, 어깨 높이 (윗면 반원의 중심) */
+const SIDE_W = 0.058;
+const SIDE_SHOULDER_Y = YOKE_TOP + SIDE_W + 0.004;
 const BODY_BOT = 0.03;
 
 const dir = (phi: number): [number, number] => [-Math.sin(phi), Math.cos(phi)];
@@ -197,8 +200,9 @@ export function drawFigure(
   for (let i = 0; i < 2; i++) {
     const s = sides[i];
     const mix = lerp(s, f, tt);
-    const shx = s * lerp(0.1655, 0.02, tt);
-    sh[i] = rot(shx, SHOULDER_Y);
+    // 옆모습에서는 어깨가 몸통 윗부분 반원의 한가운데 (팔의 둥근 끝이 곧 어깨가 되도록)
+    const shx = s * lerp(0.1655, 0, tt);
+    sh[i] = rot(shx, lerp(SHOULDER_Y, SIDE_SHOULDER_Y, tt));
     const p1 = th - pose.arms[i].a * mix;
     const d1 = dir(p1);
     el[i] = [sh[i][0] + d1[0] * UPPER_ARM, sh[i][1] + d1[1] * UPPER_ARM];
@@ -269,14 +273,15 @@ export function drawFigure(
     ctx.restore();
   };
 
-  const yw = lerp(0.205, 0.08, tt);
-  const bw = lerp(0.1115, 0.074, tt);
+  // 옆모습: 몸통 윗부분과 아랫부분을 같은 너비로, 윗면은 반원 — 어깨 모서리가 팔 밖으로 튀어나오지 않는다
+  const yw = lerp(0.205, SIDE_W, tt);
+  const bw = lerp(0.1115, SIDE_W, tt);
   const torsoPath = () => {
     ctx.save();
     ctx.translate(hipX, hipY);
     ctx.rotate(th);
     ctx.beginPath();
-    roundRectPath(ctx, -yw, YOKE_TOP, yw, YOKE_BOT, lerp(0.088, 0.07, tt));
+    roundRectPath(ctx, -yw, YOKE_TOP, yw, YOKE_BOT, lerp(0.088, SIDE_W, tt));
     roundRectPath(ctx, -bw, YOKE_TOP + 0.04, bw, BODY_BOT, 0.02, 0);
     ctx.restore();
   };

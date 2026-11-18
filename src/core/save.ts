@@ -24,6 +24,8 @@ export interface Settings {
   music: number;
   shake: boolean;
   grain: boolean;
+  /** 첫 입력에서 자동으로 전체 화면 (기본 켜짐) */
+  fullscreen?: boolean;
   /** 바꾼 조작 키 (없으면 기본값) */
   keys?: Partial<Record<'interact' | 'down' | 'jump' | 'left' | 'right', string[]>>;
 }

@@ -1,4 +1,4 @@
-import { app, type Scene } from '../app';
+import { app, enterFullscreen, exitFullscreen, type Scene } from '../app';
 import { audio } from '../core/audio';
 import { Save } from '../core/save';
 import { DEFAULT_BINDS, RESERVED, keyName, type Bindable } from '../core/input';
@@ -187,16 +187,20 @@ export function settingsPanel(onBack: () => void) {
     r.appendChild(inp);
     wrap.appendChild(r);
   };
-  const toggle = (label: string, key: 'grain' | 'shake') => {
+  const toggle = (label: string, key: 'grain' | 'shake' | 'fullscreen') => {
     const r = document.createElement('label');
     r.className = 'row';
     r.innerHTML = `<span>${label}</span>`;
     const inp = document.createElement('input');
     inp.type = 'checkbox';
-    inp.checked = s[key];
+    inp.checked = s[key] !== false;
     inp.onchange = () => {
       s[key] = inp.checked;
       app.applySettings();
+      if (key === 'fullscreen') {
+        if (inp.checked) enterFullscreen();
+        else exitFullscreen();
+      }
     };
     r.appendChild(inp);
     wrap.appendChild(r);
@@ -207,6 +211,7 @@ export function settingsPanel(onBack: () => void) {
   row('음악', 'music');
   toggle('필름 노이즈', 'grain');
   toggle('화면 흔들림', 'shake');
+  toggle('전체 화면', 'fullscreen');
   wrap.appendChild(keyBindSection());
   const back = document.createElement('button');
   back.textContent = '돌아가기';

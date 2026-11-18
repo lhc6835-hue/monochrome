@@ -9,7 +9,7 @@ import { drawSky, drawLayers, type BgTheme } from '../gfx/background';
 import { drawIcon, type IconName } from '../gfx/icons';
 import { drawBlock, drawGroundSlab, drawCrack, INK } from '../gfx/ground';
 import { drawFlower, drawGlow, drawPetal, PETAL_COLORS } from '../gfx/flower';
-import { blankReach, drawBlankFigure, drawBlankHand, drawErasedRegion, PAPER } from '../gfx/blank';
+import { blankReach, drawBlankFigure, drawErasedRegion, PAPER } from '../gfx/blank';
 import { drawMemory } from '../gfx/memoryArt';
 import { plantLegs, rigidPose } from '../gfx/figure';
 import { Player, PH } from '../world/player';
@@ -1733,6 +1733,15 @@ export class GameScene implements Scene, GameAPI {
     const cam = this.cam;
     cam.apply(ctx, s, 1);
     drawErasedRegion(ctx, c.front, v.x0 - 100, v.y0 - 100, v.y1 + 100, this.t, this.level.eraseColor);
+    // 붙잡힌 몸은 흰 종이 위로 다시 그린다 — 여백보다 먼저 그려서, 여백의 팔끝이 가슴을 덮어 끌어안는 것처럼 보이게
+    if (this.grabT >= 0.12 && this.player.state === 'dead') {
+      const F = app.figLayer;
+      s.clearLayer(F);
+      cam.apply(F.ctx, s, 1);
+      this.player.draw(F.ctx, this, this.petals);
+      s.composite(F);
+      cam.apply(ctx, s, 1);
+    }
     // 여백의 몸 (자세는 updateBlank 에서)
     const L = app.fxLayer;
     s.clearLayer(L);
@@ -1762,29 +1771,6 @@ export class GameScene implements Scene, GameAPI {
         cy = B.by - B.scale * 0.64;
       drawGlow(ctx, cx, cy, B.scale * 0.5 * ctl.glow, PETAL_COLORS, ctl.glow);
       drawPetal(ctx, cx, cy, B.scale * 0.05 * ctl.glow, PETAL_COLORS[(Math.floor(this.t * 2) % 7)], this.t * 0.4);
-    }
-    // 붙잡힌 몸은 흰 종이 위로 보이게 다시 그리고, 그 위를 여백의 손가락이 감싼다
-    if (this.grabT >= 0.12 && this.player.state === 'dead') {
-      const F = app.figLayer;
-      s.clearLayer(F);
-      cam.apply(F.ctx, s, 1);
-      this.player.draw(F.ctx, this, this.petals);
-      s.composite(F);
-      const fade = 1 - clamp((this.player.deathT - 1.05) / 0.35);
-      if (fade > 0) {
-        cam.apply(ctx, s, 1);
-        // 여백의 손이 가슴을 감싸 쥔다 (팔이 뻗어 온 방향으로)
-        const [hx, hy] = B.hand;
-        const sx = B.bx + B.scale * 0.08,
-          sy = B.by - B.scale * 0.68;
-        const dx = hx - sx,
-          dy = hy - sy;
-        const dl = Math.hypot(dx, dy) || 1;
-        const size = B.scale * 0.14;
-        ctx.save();
-        ctx.globalAlpha = fade;
-        drawBlankHand(ctx, hx - (dx / dl) * size * 0.45, hy - (dy / dl) * size * 0.45, size, Math.atan2(dx, dy), this.t, { curl: 0.95, spread: 0.6 });
-      }
     }
   }
 

@@ -109,6 +109,8 @@ export class Player implements PlayerLike {
   swimming = false;
   /** 연출: 픽토그램으로 굳어 있게 한다 */
   forceFreeze = false;
+  /** 꽃을 가슴 앞에 받쳐 든 정도 (0..1) */
+  private holdK = 0;
   /** 연출: 몸이 하얗게 비어 연필 윤곽만 남는다 (0..1) */
   hollow = 0;
   ladder: LadderLike | null = null;
@@ -786,6 +788,23 @@ export class Player implements PlayerLike {
       lerpPose(this.blendFrom, P, k, P);
       if (key !== 'climb' && this.poseKey !== 'climb') P.turn = turn;
     }
+    // 꽃을 든 손: 팔꿈치를 굽혀 꽃을 가슴 앞에 조심스럽게 받쳐 든다. 달릴 때도 크게 흔들지 않는다.
+    // (구르기·사다리·턱 오르기·상자·꽃잎 건네기·헤엄·굳기 중에는 손을 풀었다가, 끝나면 다시 든다)
+    const holdOk =
+      g.petals.length > 0 && !this.hideFlower && (this.state === 'normal' || this.state === 'scripted') && !this.swimming && !this.grabbing && !this.pushing && key !== 'climb' && key !== 'mantle' && key !== 'slide';
+    this.holdK = damp(this.holdK, holdOk ? 1 : 0, 9, dt);
+    if (this.holdK > 0.01) {
+      const h = this.facing > 0 ? 0 : 1;
+      const tt = clamp(Math.abs(P.turn));
+      const run = clamp(sp / PH.RUN);
+      // 걸음마다 아주 조금 오르내린다
+      const bob = Math.sin(this.phase * 2) * 0.07 * run;
+      // 정면: 가슴 가운데로 / 옆모습: 가슴 앞으로 (공중에서는 몸 쪽으로 조금 더 당긴다)
+      const ha = lerp(-0.35, 0.32 + bob - (b.onGround ? 0 : 0.12), tt);
+      const hb = lerp(-2.25, 1.72 - bob * 0.6, tt);
+      P.arms[h].a = lerp(P.arms[h].a, ha, this.holdK);
+      P.arms[h].b = lerp(P.arms[h].b, hb, this.holdK);
+    }
     this.pose = P;
   }
 
@@ -895,6 +914,8 @@ export class Player implements PlayerLike {
     if (this.hollow > 0.01) st.alpha *= 1 - this.hollow;
     this.joints = drawFigure(ctx, this.pose, fx, fy, PH.SCALE, st, {
       heldBehind: hide,
+      // 정면이든 옆모습이든 같은 손 (돌아설 때 꽃이 반대 손으로 건너가지 않게)
+      heldArm: this.facing > 0 ? 0 : 1,
       held:
         petals.length > 0 && !(this.state === 'dead' && (this.deathCause === 'erase' || (this.deathCause === 'grab' && this.deathT > 0.9)))
           ? (fc, hx, hy, ang) => {

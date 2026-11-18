@@ -104,6 +104,8 @@ export class Player implements PlayerLike {
   hideFlower = false;
   /** 물에 잠긴 정도 0..1 */
   submerge = 0;
+  /** 물 위에 떠서 헤엄치는 중 */
+  swimming = false;
   ladder: LadderLike | null = null;
   private climbPhase = 0;
   private hopT = 0;
@@ -415,7 +417,7 @@ export class Player implements PlayerLike {
         g.noise(b.x, b.y, sub > 0.05 ? 420 : 260);
         if (sub > 0.05) audio.play('splash3', { vol: 0.4 });
       }
-    } else if (control && inp.pressed('jump') && sub > 0.3 && sub < 0.8 && this.hopT <= 0 && this.state === 'normal') {
+    } else if (control && inp.pressed('jump') && sub > 0.3 && sub < (this.swimming ? 0.97 : 0.8) && this.hopT <= 0 && this.state === 'normal') {
       // 물속에서 가볍게 차오르기 (머리가 물 밖에 있을 때만)
       b.vy = -600;
       this.hopT = 0.5;
@@ -430,6 +432,12 @@ export class Player implements PlayerLike {
     if (b.vy >= 0) this.jumping = false;
     if (sub > 0.3) b.vy = Math.min(230, b.vy + PH.GRAV * 0.45 * dt);
     else b.vy = Math.min(PH.MAX_FALL, b.vy + PH.GRAV * dt);
+    // 헤엄칠 수 있는 물(잔잔한 바다·동굴): 머리가 물 위로 나오도록 떠오른다
+    this.swimming = !!(water && (water as { def?: { swim?: boolean } }).def?.swim) && sub > 0.62 && !b.onGround;
+    if (water && (water as { def?: { swim?: boolean } }).def?.swim && sub > 0.8) {
+      b.vy -= (sub - 0.8) * 15000 * dt;
+      b.vy *= Math.max(0, 1 - 4 * dt);
+    }
 
     // ---------- 상자 밀기 ----------
     this.pushing = 0;
@@ -643,6 +651,22 @@ export class Player implements PlayerLike {
         }
       }
       this.rollU = u;
+    } else if (this.swimming) {
+      // 헤엄: 팔을 번갈아 저으며 다리로 찬다
+      key = 'swim';
+      const sw = g.t * 5.5;
+      P.turn = this.facing;
+      const nI = this.facing > 0 ? 0 : 1;
+      const fI = 1 - nI;
+      P.lean = 0.55;
+      P.headTilt = -0.45;
+      P.arms[nI].a = 1.7 + Math.sin(sw) * 1.1;
+      P.arms[nI].b = 0.5 + Math.max(0, Math.cos(sw)) * 0.8;
+      P.arms[fI].a = 1.7 - Math.sin(sw) * 1.1;
+      P.arms[fI].b = 0.5 + Math.max(0, -Math.cos(sw)) * 0.8;
+      P.legs[nI].a = -0.25 + Math.sin(sw * 1.6) * 0.3;
+      P.legs[fI].a = -0.25 - Math.sin(sw * 1.6) * 0.3;
+      P.legs[nI].b = P.legs[fI].b = 0.35;
     } else if (!b.onGround) {
       key = 'air';
       P.turn = this.facing;

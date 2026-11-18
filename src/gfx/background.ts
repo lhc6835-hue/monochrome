@@ -295,3 +295,31 @@ export function forestTheme(width: number, seed = 66): BgTheme {
   };
   return { skyTop: '#d9d9d5', skyMid: '#e4e4e0', skyBot: '#cfcfcb', layers: [far, mid, near] };
 }
+
+/** 표지의 바다: 낮은 수평선, 먼 등대와 항구 기중기, 바다에 꽂힌 표지판들 */
+export function seaTheme(width: number, seed = 77): BgTheme {
+  const rng = mulberry32(seed);
+  const far: BgLayer = {
+    p: 0.1,
+    color: '#bdbdb9',
+    ground: 60,
+    band: '#a9a9a5',
+    haze: 0.3,
+    items: scatter(rng, -1200, width * 0.1 + 2600, 500, 1200, (x) => (rng() < 0.4 ? { icon: 'lighthouse' as IconName, x, h: 160 + rng() * 60 } : { icon: 'crane' as IconName, x, h: 180 + rng() * 120, flip: rng() < 0.5 })),
+  };
+  const mid: BgLayer = {
+    p: 0.3,
+    color: '#8f8f8b',
+    ground: 120,
+    band: '#858581',
+    haze: 0.12,
+    items: scatter(rng, -1200, width * 0.3 + 2400, 260, 700, (x) => {
+      const r = rng();
+      if (r < 0.35) return { icon: 'warning' as IconName, x, h: 70 + rng() * 40, y: -10 };
+      if (r < 0.6) return { icon: 'signpost' as IconName, x, h: 110 + rng() * 60 };
+      if (r < 0.8) return { icon: 'crane' as IconName, x, h: 300 + rng() * 200, flip: rng() < 0.5 };
+      return { icon: 'lighthouse' as IconName, x, h: 260 + rng() * 120 };
+    }),
+  };
+  return { skyTop: '#c9c9c6', skyMid: '#d6d6d2', skyBot: '#b9b9b5', layers: [far, mid] };
+}

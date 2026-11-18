@@ -13,6 +13,8 @@ export interface SaveData {
   flags: string[];
   playTime: number;
   deaths: number;
+  /** 돋아날 차례를 기다리는 꽃잎 */
+  buds?: number;
 }
 
 export interface Settings {

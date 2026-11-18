@@ -511,8 +511,16 @@ export class PetalPickup extends Entity {
     if (this.taken) return;
     const p = g.player.body;
     if (Math.abs(p.x - this.x) < 50 && p.y - p.h - 20 < this.y && p.y + 20 > this.y) {
+      // 꽃이 가득 찼으면 줍지 않는다 (그 자리에 남는다)
+      if (g.petals.length >= 7) {
+        if (!g.flags.has('hint:full')) {
+          g.flags.add('hint:full');
+          g.hint('꽃이 가득 차 있다  ·  누군가에게 꽃잎을 건넨 뒤 다시 오자', '꽃이 가득 차 있다  ·  누군가에게 꽃잎을 건넨 뒤 다시 오자', 4);
+        }
+        return;
+      }
       this.taken = true;
-      if (g.petals.length < 7) g.petals.push(this.color);
+      g.petals.push(this.color);
       audio.play('chime', { vol: 0.6, rate: 1.2 });
       audio.play('bell4', { vol: 0.35, rate: 1.4 });
       g.parts.burst(this.x, this.y, [this.color, '#ffffff'], 16, 220);
@@ -559,6 +567,7 @@ export class Memory extends Entity {
     if (!this.seen) {
       this.seen = true;
       g.memories.add(this.id);
+      g.budPetal();
       audio.play('paper_crush', { vol: 0.4 });
     }
     g.showMemory(this.art);

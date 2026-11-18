@@ -52,7 +52,7 @@ export type EntityDef =
   | { type: 'cctv'; id: string; x: number; y: number; mid: number; amp: number; period: number; phase?: number; len?: number; half?: number; pole?: boolean }
   | { type: 'faller'; id: string; x: number; h: number; dir: 1 | -1; trigger: number; icon?: IconName }
   /** 물: x0~x1, 바닥 floor, 수면 low/high (신호가 켜지면 high) */
-  | { type: 'water'; id: string; x0: number; x1: number; floor: number; low: number; high?: number; signal?: string; speed?: number; start?: number }
+  | { type: 'water'; id: string; x0: number; x1: number; floor: number; low: number; high?: number; signal?: string; speed?: number; start?: number; swim?: boolean }
   | { type: 'lever'; id: string; x: number; y?: number; signal: string; on?: boolean }
   | { type: 'ladder'; id: string; x: number; top: number; bottom: number }
   /** 메아리: 소리로 사냥하는 하얀 존재 */
@@ -80,7 +80,15 @@ export type EntityDef =
   /** 새 떼 (n 마리, 중심 x 에서 ±spread) */
   | { type: 'flock'; id: string; x: number; y?: number; n?: number; spread?: number; size?: number }
   /** 술래: 나무 앞 x 에 선 아이(child = 주민 id)가 x0 ~ x 구역을 지켜본다 */
-  | { type: 'seeker'; id: string; x: number; x0: number; child: string };
+  | { type: 'seeker'; id: string; x: number; x0: number; child: string }
+  /** 조수: low(썰물 수면 y) ↔ high(만조 수면 y). timing = [썰물 유지, 밀물, 만조 유지, 썰물] 초. post = 눈금 기둥 x */
+  | { type: 'tide'; id: string; x0: number; x1: number; floor: number; low: number; high: number; timing?: [number, number, number, number]; offset?: number; swim?: boolean; post?: number }
+  /** 부표: y = 윗면, heavy = 밟으면 가라앉음 */
+  | { type: 'buoy'; id: string; x: number; y: number; w?: number; amp?: number; period?: number; phase?: number; heavy?: boolean }
+  /** 등대 불빛: (x, y) 에서 mid ± amp 로 훑는다. signal 이 켜지면 (한 번 켜지면 계속) */
+  | { type: 'beacon'; id: string; x: number; y: number; mid: number; amp: number; period: number; len?: number; half?: number; signal?: string; sweep?: [number, number] }
+  /** 빛이 닿을 때만 단단한 발판. by = 등대 id 또는 'flower'(꽃빛). h 가 없으면 위로만 막는 판자 */
+  | { type: 'litplank'; id: string; x: number; y: number; w: number; h?: number; by: string; hold?: number };
 
 export interface TriggerDef {
   id: string;
@@ -174,6 +182,8 @@ export interface GameAPI {
   chaseActive(): boolean;
   setControl(on: boolean): void;
   showMemory(art: string): void;
+  /** 기억 조각을 처음 봤을 때: 꽃잎이 하나 돋는다 */
+  budPetal(): void;
   endSlice(): void;
   isDead(): boolean;
 }

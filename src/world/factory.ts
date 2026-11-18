@@ -5,6 +5,7 @@ import { Conveyor, GiantStamp, Lift, Press, Scanner, Train } from './entities3';
 import { Hazard, TrainCar } from './entities4';
 import { Recorder } from './entities5';
 import { Flock, Seeker } from './entities6';
+import { Beacon, Buoy, LitPlank, Tide } from './entities7';
 
 export function createEntity(def: EntityDef): Entity {
   switch (def.type) {
@@ -56,5 +57,13 @@ export function createEntity(def: EntityDef): Entity {
       return new Flock(def);
     case 'seeker':
       return new Seeker(def);
+    case 'tide':
+      return new Tide(def);
+    case 'buoy':
+      return new Buoy(def);
+    case 'beacon':
+      return new Beacon(def);
+    case 'litplank':
+      return new LitPlank(def);
   }
 }

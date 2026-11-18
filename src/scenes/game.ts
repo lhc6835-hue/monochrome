@@ -41,6 +41,8 @@ export interface Carry {
   flags: string[];
   playTime: number;
   deaths: number;
+  /** 기억 조각을 보고 돋아날 차례를 기다리는 꽃잎 (꽃이 가득 찼을 때) */
+  buds?: number;
 }
 
 interface Flight {
@@ -100,6 +102,10 @@ export class GameScene implements Scene, GameAPI {
   timeScale = 1;
   camFocus: CamFocus | null = null;
   cineFade = 0;
+  /** 연출용 닫힘 색 (기본 검정, 여백에게 삼켜질 땐 흰색) */
+  cineFadeColor = '#000';
+  /** 번개 (1 = 번쩍) */
+  flash = 0;
   trainSpeed = 0;
   /** 기록대 */
   recording = false;
@@ -187,12 +193,14 @@ export class GameScene implements Scene, GameAPI {
         this.flags = new Set(c.flags);
         this.playTime = c.playTime;
         this.deaths = c.deaths;
+        this.buds = c.buds ?? 0;
       }
       this.snap = this.makeSnap(sx);
       this.snap.spawn.y = 0;
       this.snapPetals = [...this.petals];
       this.snapSaved = [...this.saved];
       this.snapMem = [...this.memories];
+      this.snapBuds = this.buds;
       if (this.carry) this.persist();
       this.level.onRestore?.(this);
       const st = this.level.startScript;
@@ -367,6 +375,34 @@ export class GameScene implements Scene, GameAPI {
   setControl(on: boolean) {
     this.control = on;
   }
+  /** 꽃빛의 반지름 (굳어 있으면 꽃을 가슴에 숨겨 작아진다) */
+  lightRadius() {
+    return this.player.freezeAmt > 0.5 ? 120 : 150 + this.petals.length * 45;
+  }
+  /** 기억 조각을 처음 봤다: 꽃에 꽃잎이 하나 다시 돋는다 (가득 찼으면 자리가 날 때까지 기다린다) */
+  budPetal() {
+    this.buds++;
+    this.budT = -0.6;
+  }
+  private updateBuds(dt: number) {
+    if (this.buds <= 0 || this.petals.length >= 7 || this.mode !== 'play') {
+      this.budT = Math.min(this.budT, 0);
+      return;
+    }
+    this.budT += dt;
+    if (this.budT < 1.1) return;
+    this.budT = 0;
+    this.buds--;
+    // 지금 꽃에 없는 색부터 돋는다
+    const color = PETAL_COLORS.find((c) => !this.petals.includes(c)) ?? PETAL_COLORS[this.petals.length % 7];
+    this.petals.push(color);
+    const j = this.player.joints;
+    const [hx, hy] = j ? j.hand[j.near] : [this.player.x, this.player.y - 80];
+    this.parts.burst(hx, hy - 24, [color, '#ffffff'], 14, 160);
+    this.parts.ring(hx, hy - 24, color, 90, 0.7);
+    audio.play('chime', { vol: 0.5, rate: 1.1 });
+    audio.play('bell2', { vol: 0.3, rate: 1.4, delay: 0.1 });
+  }
   showMemory(art: string) {
     this.mode = 'memory';
     this.memArt = art;
@@ -419,12 +455,17 @@ export class GameScene implements Scene, GameAPI {
       flags: [...this.flags],
       playTime: this.playTime,
       deaths: this.deaths,
+      buds: this.snapBuds,
     };
     Save.store(d);
   }
   private snapPetals: string[] = [...PETAL_COLORS];
   private snapSaved: string[] = [];
   private snapMem: string[] = [];
+  private snapBuds = 0;
+  /** 돋아날 꽃잎 수 / 다음 꽃잎이 돋기까지 */
+  buds = 0;
+  private budT = 0;
 
   private checkpoint(tr: TriggerDef) {
     if (this.cpId === tr.id) return;
@@ -434,6 +475,7 @@ export class GameScene implements Scene, GameAPI {
     this.snapPetals = [...this.petals];
     this.snapSaved = [...this.saved];
     this.snapMem = [...this.memories];
+    this.snapBuds = this.buds;
     this.persist();
     this.cpFlash = 1;
     audio.play('bell4', { vol: 0.25, rate: 1.6 });
@@ -445,6 +487,7 @@ export class GameScene implements Scene, GameAPI {
     this.snapPetals = d.petals;
     this.snapSaved = d.saved;
     this.snapMem = d.memories;
+    this.snapBuds = d.buds ?? 0;
     this.flags = new Set(d.flags);
     this.playTime = d.playTime;
     this.deaths = d.deaths;
@@ -459,6 +502,8 @@ export class GameScene implements Scene, GameAPI {
     this.petals = [...this.snapPetals];
     this.saved = new Set(this.snapSaved);
     this.memories = new Set(this.snapMem);
+    this.buds = this.snapBuds;
+    this.budT = 0;
     this.player.place(sn.spawn.x, sn.spawn.y);
     this.player.facing = 1;
     this.stopChase();
@@ -468,6 +513,8 @@ export class GameScene implements Scene, GameAPI {
     this.timeScale = 1;
     this.camFocus = null;
     this.cineFade = 0;
+    this.cineFadeColor = '#000';
+    this.flash = 0;
     this.chase.cine = false;
     this.flights = [];
     this.erased.clear();
@@ -527,7 +574,7 @@ export class GameScene implements Scene, GameAPI {
       if (this.transT > 1.8) {
         this.mode = 'ending';
         this.endT = -999;
-        const c: Carry = { petals: [...this.petals], saved: [...this.saved], memories: [...this.memories], flags: [...this.flags], playTime: this.playTime, deaths: this.deaths };
+        const c: Carry = { petals: [...this.petals], saved: [...this.saved], memories: [...this.memories], flags: [...this.flags], playTime: this.playTime, deaths: this.deaths, buds: this.buds };
         app.setScene(new GameScene(null, this.nextLevel, c));
       }
       return;
@@ -559,6 +606,8 @@ export class GameScene implements Scene, GameAPI {
     this.updateRecording(dt);
     this.updateFlood(dt);
     this.updateFlights(dt);
+    this.updateBuds(dt);
+    this.flash = Math.max(0, this.flash - realDt * 3.2);
     this.co.update(dt);
     this.updateBlank(dt);
 
@@ -1026,7 +1075,8 @@ export class GameScene implements Scene, GameAPI {
     this.parts.render(ctx);
 
     this.darkNow = damp(this.darkNow, Math.max(this.level.dark ?? 0, this.darkBoost), 6, dt);
-    if (this.darkNow > 0.01) this.drawDarkness(this.darkNow);
+    if (this.darkNow > 0.01) this.drawDarkness(this.darkNow * (1 - this.flash * 0.9));
+    if (this.flash > 0.01) app.post.fill(s, '#ffffff', this.flash * 0.22);
     this.drawGhost();
     if (this.flood.active) this.drawFlood(v);
     if (this.recording) app.post.fill(s, '#ffffff', 0.04 + Math.sin(this.t * 6) * 0.015);
@@ -1066,8 +1116,11 @@ export class GameScene implements Scene, GameAPI {
 
     if (this.mode === 'memory') drawMemory(s, this.memArt, this.memT, clamp(this.memT / 0.5));
     if (this.mode === 'ending') this.drawEnding();
-    if (this.cineFade > 0 && this.mode !== 'transition') app.post.fill(s, '#000', this.cineFade);
-    if (this.mode === 'transition') app.post.fill(s, '#000', Math.max(this.cineFade, clamp(this.transT / 1.4)));
+    if (this.cineFade > 0 && this.mode !== 'transition') app.post.fill(s, this.cineFadeColor, this.cineFade);
+    if (this.mode === 'transition') {
+      if (this.cineFade > 0) app.post.fill(s, this.cineFadeColor, this.cineFade);
+      app.post.fill(s, '#000', clamp(this.transT / 1.4) * (this.cineFade > 0 && this.cineFadeColor !== '#000' ? 0 : 1));
+    }
   }
 
   // ------------------------------------------------------------------
@@ -1449,6 +1502,30 @@ export class GameScene implements Scene, GameAPI {
         ctx.fill();
         return;
       }
+      case 'hull': {
+        // 뒤집혀 모래에 박힌 배 밑동
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.moveTo(so.x, so.y + so.h);
+        ctx.lineTo(so.x + 10, so.y + 20);
+        ctx.quadraticCurveTo(so.x + so.w * 0.5, so.y - 10, so.x + so.w - 10, so.y + 20);
+        ctx.lineTo(so.x + so.w, so.y + so.h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#3a3a38';
+        ctx.lineWidth = 3;
+        for (let k = 1; k < 4; k++) {
+          ctx.beginPath();
+          ctx.moveTo(so.x + 14, so.y + 20 + (k * so.h) / 4);
+          ctx.lineTo(so.x + so.w - 14, so.y + 20 + (k * so.h) / 4);
+          ctx.stroke();
+        }
+        return;
+      }
+      case 'spar':
+        ctx.fillStyle = INK;
+        ctx.fillRect(so.x, so.y, so.w, 10);
+        return;
       case 'log': {
         // 쓰러진 통나무: 옆에서 본 둥근 끝
         ctx.fillStyle = INK;
@@ -1753,6 +1830,7 @@ export class GameScene implements Scene, GameAPI {
       rail: '끊어진 다리 너머에는, 끝없는 서가가 있었다.',
       archive: '천창 너머로, 바람에 흔들리는 회색 숲이 보였다.',
       forest: '숲이 끝나는 곳에서, 회색 바다가 숨을 쉬고 있었다.',
+      sea: '하얀 파도 너머에는, 아무것도 그려지지 않은 땅이 있었다.',
     };
     line(closing[this.level.id] ?? '', s.H * 0.38, 2.0, 26);
     line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${this.memories.size} / ${mems}`, s.H * 0.5, 4.0, 19, '#8d8d8a');

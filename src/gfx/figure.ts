@@ -111,6 +111,10 @@ export interface Joints {
   eye: [number, number];
   near: number;
   top: number;
+  /** 바닥에 닿을 수 있는 모든 점 (x, y, 반지름) — 구르기 접지 계산용 */
+  pts: [number, number, number][];
+  /** 엉덩이 중심 */
+  hip: [number, number];
 }
 
 // 비율 상수
@@ -352,6 +356,14 @@ export function drawFigure(
     eye: toW(eyeC),
     near: near === -1 ? 1 : near,
     top: y + (headC[1] - headR) * scale * sq,
+    pts: [
+      ...[hd[0], hd[1], el[0], el[1], sh[0], sh[1]].map((p): [number, number, number] => [...toW(p), (ARM_W / 2) * scale]),
+      ...[ft[0], ft[1], kn[0], kn[1], hp[0], hp[1]].map((p): [number, number, number] => [...toW(p), (LEG_W / 2) * scale]),
+      [...toW(headC), headR * scale],
+      // 몸통 모서리 (등)
+      ...[rot(-bw, YOKE_TOP), rot(bw, YOKE_TOP), rot(-bw, BODY_BOT), rot(bw, BODY_BOT)].map((p): [number, number, number] => [...toW(p), 0.03 * scale]),
+    ],
+    hip: toW(rot(0, 0)),
   };
 }
 

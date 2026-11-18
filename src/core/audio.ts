@@ -86,8 +86,18 @@ export class Audio {
     await Promise.all(
       SOUND_FILES.map(async (n) => {
         try {
-          const res = await fetch(base + n + '.mp3');
-          const arr = await res.arrayBuffer();
+          // 단일 HTML 빌드: 소리가 base64 로 페이지 안에 들어 있다
+          const embedded = (window as unknown as { __MONO_AUDIO?: Record<string, string> }).__MONO_AUDIO?.[n];
+          let arr: ArrayBuffer;
+          if (embedded) {
+            const bin = atob(embedded);
+            const u8 = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+            arr = u8.buffer;
+          } else {
+            const res = await fetch(base + n + '.mp3');
+            arr = await res.arrayBuffer();
+          }
           const buf = await new Promise<AudioBuffer>((ok, err) => ctx.decodeAudioData(arr, ok, err));
           this.buffers.set(n, buf);
         } catch (e) {

@@ -8,6 +8,7 @@
 npm install
 npm run dev      # 개발 서버
 npm run build    # dist/ 에 배포용 빌드
+npm run build:single   # dist/the-monochrome.html 한 파일 (효과음·글꼴 포함, 더블클릭으로 실행)
 ```
 
 ## 조작

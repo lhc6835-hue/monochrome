@@ -266,6 +266,10 @@ export class Resident extends Entity {
   private waveT = -1;
   kid: boolean;
   joints: Joints | null = null;
+  /** 굳어 있는 동안 다른 자세 (술래처럼) */
+  poseOverride: (() => Pose) | null = null;
+  /** 아직 꽃잎을 건넬 수 없다 */
+  locked = false;
 
   constructor(def: Extract<EntityDef, { type: 'resident' }>) {
     super(def.id);
@@ -285,7 +289,7 @@ export class Resident extends Entity {
   }
 
   interactPos(): [number, number] | null {
-    if (this.state !== 'frozen' || !this.savable) return null;
+    if (this.state !== 'frozen' || !this.savable || this.locked) return null;
     return [this.body.x, this.body.y - this.scale];
   }
   prompt(g: GameAPI): Prompt | null {
@@ -384,7 +388,7 @@ export class Resident extends Entity {
 
   private computePose(g: GameAPI): Pose {
     const p = this.pose;
-    if (this.state === 'frozen') return rigidPose();
+    if (this.state === 'frozen') return this.poseOverride ? this.poseOverride() : rigidPose();
     const t = g.t;
     const R = rigidPose();
     const sp = Math.abs(this.body.vx);

@@ -245,7 +245,40 @@ function aloneArt(): Stroke[] {
   return S;
 }
 
-const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt, station: stationArt, together: togetherArt, alone: aloneArt };
+/** 숨바꼭질: 나무에 얼굴을 묻고 세는 정원사, 덤불·나무 뒤에 숨어 웃는 아이들 (가슴에 꽃잎) */
+function hideArt(): Stroke[] {
+  const S: Stroke[] = [];
+  S.push({ pts: [[-440, 190], [440, 190]], color: GRAY, w: 5 });
+  // 큰 나무
+  S.push({ pts: [[300, 190], [296, 20], [300, -60]], color: DARK, w: 14 });
+  S.push({ pts: circle(300, -130, 110, 22), color: GRAY, w: 6 });
+  S.push({ pts: circle(240, -90, 60, 14), color: GRAY, w: 5 });
+  // 정원사: 나무에 이마를 대고 팔로 눈을 가린다
+  S.push({ pts: circle(250, -40, 28), color: DARK, w: 5 });
+  S.push({ pts: [[244, -12], [226, 110]], color: DARK, w: 6 });
+  S.push({ pts: [[226, 110], [206, 188]], color: DARK, w: 6 });
+  S.push({ pts: [[226, 110], [244, 188]], color: DARK, w: 6 });
+  S.push({ pts: [[240, 10], [270, -10], [262, -40]], color: DARK, w: 6 });
+  S.push({ pts: circle(232, 30, 8, 8), color: PETAL_COLORS[2], w: 4, fill: true });
+  // 숫자 세는 말풍선 (회색 점 열 개)
+  for (let i = 0; i < 10; i++) S.push({ pts: circle(120 - i * 22, -150 - Math.sin(i * 0.6) * 18, 5, 6), color: '#8d8d89', w: 3, fill: true });
+  // 덤불 뒤 아이 둘
+  S.push({ pts: circle(-120, 150, 70, 16), color: GRAY, w: 5 });
+  personAt(S, -150, 190, 0.55, DARK, [[-150, 110], [-120, 90]]);
+  S.push({ pts: circle(-150, 120, 6, 6), color: PETAL_COLORS[0], w: 3, fill: true });
+  personAt(S, -90, 190, 0.5, DARK, [[-90, 120], [-110, 96]]);
+  S.push({ pts: circle(-90, 128, 6, 6), color: PETAL_COLORS[5], w: 3, fill: true });
+  // 작은 나무 뒤 아이 하나 (얼굴만 빼꼼)
+  S.push({ pts: [[-330, 190], [-332, 0]], color: DARK, w: 12 });
+  S.push({ pts: circle(-332, -60, 70, 16), color: GRAY, w: 5 });
+  S.push({ pts: circle(-300, 60, 18), color: DARK, w: 4 });
+  S.push({ pts: circle(-300, 92, 5, 6), color: PETAL_COLORS[3], w: 3, fill: true });
+  // 웃음 (짧은 획)
+  for (let i = 0; i < 3; i++) S.push({ pts: [[-60 + i * 10, 60 - i * 8], [-54 + i * 10, 52 - i * 8]], color: '#9a9a96', w: 3 });
+  return S;
+}
+
+const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt, station: stationArt, together: togetherArt, alone: aloneArt, hide: hideArt };
 const cache = new Map<string, Stroke[]>();
 
 export function drawMemory(s: Screen, art: string, t: number, alpha: number) {

@@ -4,6 +4,7 @@ import { Echo, Ladder, Lever, Shaft, Water } from './entities2';
 import { Conveyor, GiantStamp, Lift, Press, Scanner, Train } from './entities3';
 import { Hazard, TrainCar } from './entities4';
 import { Recorder } from './entities5';
+import { Flock, Seeker } from './entities6';
 
 export function createEntity(def: EntityDef): Entity {
   switch (def.type) {
@@ -51,5 +52,9 @@ export function createEntity(def: EntityDef): Entity {
       return new Hazard(def);
     case 'recorder':
       return new Recorder(def);
+    case 'flock':
+      return new Flock(def);
+    case 'seeker':
+      return new Seeker(def);
   }
 }

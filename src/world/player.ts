@@ -304,7 +304,7 @@ export class Player implements PlayerLike {
     }
 
     // ---------- 구르기 (달리면서 ↓) ----------
-    if (this.state === 'normal' && b.onGround && control && inp.pressed('down') && Math.abs(b.vx) > 230) {
+    if (this.state === 'normal' && b.onGround && control && inp.pressed('down') && ax !== 0 && Math.abs(b.vx) > 230) {
       this.state = 'slide';
       this.slideT = 0;
       this.rollT = 0;

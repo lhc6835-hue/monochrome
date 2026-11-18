@@ -240,8 +240,8 @@ export class GameScene implements Scene, GameAPI {
     this.hintDur = dur;
   }
   noise(x: number, y: number, r: number) {
-    if (!this.hasEcho) return;
-    for (const e of this.ents) if (e instanceof Echo) e.hear(x, y, r, this.t);
+    // 듣는 존재들 (메아리, 새 떼, 술래 …)
+    for (const e of this.ents) (e as unknown as { hear?: (x: number, y: number, r: number, t: number) => void }).hear?.(x, y, r, this.t);
     if (r >= 300 && this.level.dark) this.parts.ring(x, y - 50, 'rgba(230,230,225,0.5)', r * 0.22, 0.7);
   }
   waterAt(x: number) {
@@ -263,7 +263,8 @@ export class GameScene implements Scene, GameAPI {
     audio.stopAllLoops(1.4);
   }
   kill(cause: 'erase' | 'fall' | 'crush' | 'drown' | 'grab') {
-    if (this.mode !== 'play' || this.player.state === 'dead' || this.co.running('end') || this.co.running('escape')) return;
+    // 연출 중(구덩이·벼랑으로 뛰어드는 등)에는 죽지 않는다
+    if (this.mode !== 'play' || this.player.state === 'dead' || this.co.running('end') || this.co.running('escape') || this.co.running('exit') || this.chase.cine) return;
     this.player.die(cause);
     this.mode = 'dying';
     if (this.recording) {
@@ -982,8 +983,7 @@ export class GameScene implements Scene, GameAPI {
     }
     for (const d of this.level.decor) {
       if (d.layer === 'front') continue;
-      if (d.x + d.h < v.x0 || d.x - d.h > v.x1) continue;
-      drawIcon(ctx, d.icon, d.x, d.y ?? 0, d.h, { flip: d.flip, color: d.color ?? '#262625', rot: d.rot });
+      this.drawDecor(ctx, d, v);
     }
     drawCrack(ctx, 74, 0, 60, 3);
     drawCrack(ctx, -820, 0, 90, 8);
@@ -1009,6 +1009,8 @@ export class GameScene implements Scene, GameAPI {
     s.composite(L);
 
     cam.apply(ctx, s, 1);
+    // 인물 앞 장식 (덤불 등 — 숨은 주민을 가린다)
+    for (const d of this.level.decor) if (d.layer === 'front') this.drawDecor(ctx, d, v);
     for (const e of this.ents) e.drawFront(ctx, this);
     // 날아가는 꽃잎
     for (const f of this.flights) {
@@ -1435,6 +1437,53 @@ export class GameScene implements Scene, GameAPI {
         drawBlock(ctx, so.x, so.y, so.w, so.h);
         ctx.fillRect(so.x + so.w / 2 - 4, so.y + so.h, 8, 60);
         return;
+      case 'rock': {
+        // 둥근 바위 (윗면이 판정과 맞도록 몸통은 사각, 모서리만 둥글게)
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.roundRect(so.x, so.y, so.w, so.h + 6, [so.h * 0.55, so.h * 0.45, 4, 4]);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.beginPath();
+        ctx.ellipse(so.x + so.w * 0.35, so.y + so.h * 0.3, so.w * 0.2, so.h * 0.12, -0.3, 0, TAU);
+        ctx.fill();
+        return;
+      }
+      case 'log': {
+        // 쓰러진 통나무: 옆에서 본 둥근 끝
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.roundRect(so.x, so.y, so.w, so.h, so.h / 2);
+        ctx.fill();
+        ctx.strokeStyle = '#3a3a38';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(so.x + so.w - so.h / 2, so.y + so.h / 2, so.h * 0.28, 0, TAU);
+        ctx.stroke();
+        return;
+      }
+      case 'branch': {
+        // 나뭇가지 (발판): 줄기 쪽이 굵고 끝이 가늘다
+        ctx.fillStyle = INK;
+        const left = (so as unknown as { dir?: number }).dir === -1;
+        ctx.beginPath();
+        const x0 = left ? so.x + so.w : so.x,
+          x1 = left ? so.x : so.x + so.w;
+        ctx.moveTo(x0, so.y - 4);
+        ctx.lineTo(x1, so.y + 2);
+        ctx.lineTo(x1, so.y + 10);
+        ctx.lineTo(x0, so.y + so.h + 10);
+        ctx.closePath();
+        ctx.fill();
+        // 잎 몇 덩이
+        for (let k = 0; k < 3; k++) {
+          const lx = lerp(x0, x1, 0.45 + k * 0.25);
+          ctx.beginPath();
+          ctx.arc(lx, so.y - 14 - (k % 2) * 8, 22 - k * 3, 0, TAU);
+          ctx.fill();
+        }
+        return;
+      }
       default:
         drawBlock(ctx, so.x, so.y, so.w, so.h);
     }
@@ -1518,6 +1567,32 @@ export class GameScene implements Scene, GameAPI {
         audio.play('paper_rip', { vol: 0.7, rate: 1.2 });
       }
     }
+  }
+
+  private drawDecor(ctx: CanvasRenderingContext2D, d: LevelDef['decor'][number], v: { x0: number; x1: number }) {
+    if (d.x + d.h * 1.5 < v.x0 || d.x - d.h * 1.5 > v.x1) return;
+    if (d.shape === 'bush') {
+      // 둥근 덩어리 서너 개를 겹친 덤불
+      const y = d.y ?? 0;
+      const h = d.h;
+      ctx.fillStyle = d.color ?? '#1b1b1a';
+      ctx.beginPath();
+      const blobs: [number, number, number][] = [
+        [-0.55, 0.42, 0.42],
+        [0, 0.58, 0.55],
+        [0.55, 0.45, 0.45],
+        [-0.2, 0.32, 0.4],
+        [0.3, 0.3, 0.38],
+      ];
+      for (const [bx, by, r] of blobs) {
+        ctx.moveTo(d.x + bx * h + r * h, y - by * h);
+        ctx.arc(d.x + bx * h, y - by * h, r * h, 0, TAU);
+      }
+      ctx.rect(d.x - h * 0.95, y - h * 0.3, h * 1.9, h * 0.3);
+      ctx.fill();
+      return;
+    }
+    drawIcon(ctx, d.icon, d.x, d.y ?? 0, d.h, { flip: d.flip, color: d.color ?? '#262625', rot: d.rot });
   }
 
   private drawBlank(v: { x0: number; x1: number; y0: number; y1: number }) {
@@ -1677,6 +1752,7 @@ export class GameScene implements Scene, GameAPI {
       factory: '기차는 회색 들판을 가로질러 달렸다.',
       rail: '끊어진 다리 너머에는, 끝없는 서가가 있었다.',
       archive: '천창 너머로, 바람에 흔들리는 회색 숲이 보였다.',
+      forest: '숲이 끝나는 곳에서, 회색 바다가 숨을 쉬고 있었다.',
     };
     line(closing[this.level.id] ?? '', s.H * 0.38, 2.0, 26);
     line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${this.memories.size} / ${mems}`, s.H * 0.5, 4.0, 19, '#8d8d8a');

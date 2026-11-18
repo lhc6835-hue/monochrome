@@ -265,3 +265,33 @@ export function archiveTheme(width: number, seed = 55): BgTheme {
   };
   return { skyTop: '#2c2b29', skyMid: '#403f3b', skyBot: '#3a3935', layers: [far, mid] };
 }
+
+/** 회색 숲: 안개 속에 겹겹이 선 침엽수와 활엽수 */
+export function forestTheme(width: number, seed = 66): BgTheme {
+  const rng = mulberry32(seed);
+  const tree = (): IconName => (rng() < 0.55 ? 'pine' : rng() < 0.5 ? 'tree2' : 'pine2');
+  const far: BgLayer = {
+    p: 0.12,
+    color: '#c9c9c5',
+    ground: -20,
+    band: '#c9c9c5',
+    haze: 0.3,
+    items: scatter(rng, -1200, width * 0.12 + 2600, 50, 120, (x) => ({ icon: tree(), x, h: 260 + rng() * 260, sx: 0.8 + rng() * 0.5 })),
+  };
+  const mid: BgLayer = {
+    p: 0.32,
+    color: '#a7a7a3',
+    ground: 30,
+    band: '#a7a7a3',
+    haze: 0.18,
+    items: scatter(rng, -1200, width * 0.32 + 2600, 90, 220, (x) => ({ icon: tree(), x, h: 380 + rng() * 360, sx: 0.8 + rng() * 0.6, flip: rng() < 0.5 })),
+  };
+  const near: BgLayer = {
+    p: 0.6,
+    color: '#7a7a76',
+    ground: 60,
+    band: '#6f6f6b',
+    items: scatter(rng, -1200, width * 0.6 + 2400, 260, 620, (x) => ({ icon: tree(), x, h: 560 + rng() * 420, sx: 0.9 + rng() * 0.5, flip: rng() < 0.5 })),
+  };
+  return { skyTop: '#d9d9d5', skyMid: '#e4e4e0', skyBot: '#cfcfcb', layers: [far, mid, near] };
+}

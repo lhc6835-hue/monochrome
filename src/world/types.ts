@@ -24,8 +24,10 @@ export interface DecorDef {
   y?: number;
   h: number;
   flip?: boolean;
-  /** back(기본) | front */
+  /** back(기본) | front (인물 앞에 그린다) */
   layer?: 'back' | 'front';
+  /** 아이콘 대신 그리는 모양 */
+  shape?: 'bush';
   color?: string;
   rot?: number;
 }
@@ -74,7 +76,11 @@ export type EntityDef =
   /** 열차를 스쳐 지나가는 것들: 머리 높이 빔, 철교 하단 철골, 터널, 끊긴 다리 */
   | { type: 'hazard'; id: string; kind: 'beam' | 'bar' | 'tunnel' | 'cliff'; w?: number }
   /** 기록대: 움직임을 기록했다가 '과거의 나'로 되풀이한다 */
-  | { type: 'recorder'; id: string; x: number; y?: number; dur?: number };
+  | { type: 'recorder'; id: string; x: number; y?: number; dur?: number }
+  /** 새 떼 (n 마리, 중심 x 에서 ±spread) */
+  | { type: 'flock'; id: string; x: number; y?: number; n?: number; spread?: number; size?: number }
+  /** 술래: 나무 앞 x 에 선 아이(child = 주민 id)가 x0 ~ x 구역을 지켜본다 */
+  | { type: 'seeker'; id: string; x: number; x0: number; child: string };
 
 export interface TriggerDef {
   id: string;

@@ -19,6 +19,8 @@ const PW = 1200;
 const PH = 720;
 const GY = 560; // 그림 속 땅 높이
 const KR = '"Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
+/** 내레이션: 이야기책 같은 명조 (없으면 기본 세리프) */
+const SERIF = '"Noto Serif KR", "Noto Serif CJK KR", "Nanum Myeongjo", "AppleMyungjo", "Batang", "BatangChe", serif';
 const JOY = PETAL_COLORS[2],
   LONG = PETAL_COLORS[4],
   SAD = PETAL_COLORS[5];
@@ -121,6 +123,8 @@ function icons(c: CanvasRenderingContext2D, list: [IconName, number, number, str
 function person(f: CanvasRenderingContext2D, x: number, y: number, s: number, setup?: (p: Pose) => void, o: { color?: string; head?: number; flower?: boolean; flowerSize?: number } = {}): Joints {
   const p = rigidPose();
   setup?.(p);
+  // 아이콘은 정면 아니면 옆모습뿐: 비스듬한 각도에선 어깨·골반 모서리가 몸 밖으로 튀어나온다
+  p.turn = Math.abs(p.turn) < 0.5 ? 0 : Math.sign(p.turn);
   const st = defaultStyle();
   st.color = o.color ?? INK;
   st.farColor = st.color === INK ? '#3c3c3c' : st.color;
@@ -243,7 +247,7 @@ function pavement(c: CanvasRenderingContext2D, horizon: number, vpx: number, col
 const PAGES: Page[] = [
   // 1. 색이 있던 세상: 꽃밭의 정원사와 아이들
   {
-    lines: ['아주 먼 옛날, 세상에는 색이 있었다.'],
+    lines: ['아주 먼 옛날, 세상은 색으로 숨 쉬었다.', '사람들은 저마다 가슴에 꽃잎 하나를 품고 살았다.'],
     from: [0.42, 0.5, 1.16],
     to: [0.56, 0.47, 1.04],
     fx: 'petals',
@@ -332,7 +336,7 @@ const PAGES: Page[] = [
   },
   // 2. 색은 곧 마음: 기쁨 · 그리움 · 슬픔 (카메라가 차례로 비춘다)
   {
-    lines: ['색은 곧 마음이었다.', '기쁨도, 그리움도, 슬픔도 모두 색이었다.'],
+    lines: ['기쁨은 노랗게 번졌고, 그리움은 푸르게 멀어졌다.', '슬픔마저도, 누군가의 빛깔이었다.'],
     // 기쁨에 다가가 있다가, 천천히 물러나 세 마음을 한 화면에
     from: [0.21, 0.5, 1.6],
     to: [0.5, 0.5, 1.0],
@@ -351,16 +355,12 @@ const PAGES: Page[] = [
       // 기쁨: 두 팔을 들고 뛰어오른 아이
       drawGlow(c, 250, 380, 300, [JOY], 0.55);
       const j1 = person(f, 250, GY - 30, 170, (p) => {
-        p.turn = 0.3;
-        p.headTilt = -0.25;
-        p.arms[0].a = -2.6;
-        p.arms[1].a = 2.6;
-        p.arms[0].b = -0.2;
-        p.arms[1].b = 0.2;
-        p.legs[0].a = 0.5;
-        p.legs[0].b = 1.2;
-        p.legs[1].a = -0.3;
-        p.legs[1].b = 1.0;
+        // 정면: 두 팔을 V자로 번쩍, 다리는 살짝 벌려 뛰어오른다
+        p.turn = 0;
+        p.headTilt = -0.12;
+        p.arms[0].a = p.arms[1].a = 2.45;
+        p.arms[0].b = p.arms[1].b = 0.12;
+        p.legs[0].a = p.legs[1].a = 0.24;
       }, { head: 1.3 });
       // 그리움: 멀리 언덕 위 작은 사람을 바라본다
       drawGlow(c, 600, 400, 300, [LONG], 0.5);
@@ -412,7 +412,7 @@ const PAGES: Page[] = [
   },
   // 3. 꽃밭이 시들었다
   {
-    lines: ['그러던 어느 날, 꽃밭이 시들었다.'],
+    lines: ['그러던 어느 해, 꽃들이 소리 없이 고개를 떨구었다.', '색이 하나 바랠 때마다, 마음도 함께 아팠다.'],
     from: [0.5, 0.55, 1.18],
     to: [0.47, 0.5, 1.03],
     fx: 'ash',
@@ -473,7 +473,7 @@ const PAGES: Page[] = [
   },
   // 4. 아무것도 느끼지 않기로 했다: 왼쪽은 사람, 오른쪽으로 갈수록 아이콘
   {
-    lines: ['사람들은 더 이상 아프고 싶지 않았다.', '그래서, 아무것도 느끼지 않기로 했다.'],
+    lines: ['사람들은 더는 아프고 싶지 않았다.', '그래서 — 느끼기를, 그만두었다.'],
     from: [0.38, 0.5, 1.2],
     to: [0.62, 0.5, 1.2],
     fx: 'rise',
@@ -525,7 +525,7 @@ const PAGES: Page[] = [
   },
   // 5. 세상은 표지판이 되었다: 소실점으로 뻗은 길
   {
-    lines: ['그렇게, 세상은 표지판이 되었다.'],
+    lines: ['세상은 반듯하고, 조용하고, 흑백이 되었다.', '아무도 다치지 않았다. 아무도 웃지 않았다.'],
     from: [0.5, 0.5, 1.25],
     to: [0.5, 0.48, 1.05],
     fx: 'none',
@@ -609,7 +609,7 @@ const PAGES: Page[] = [
   },
   // 6. 아주 오랜 시간이 흘렀다: 하늘에 남은 해의 궤적
   {
-    lines: ['아주, 아주 오랜 시간이 흘렀다.'],
+    lines: ['해가 뜨고 지기를 셀 수 없이 되풀이하는 동안,', '먼지는 쌓였고, 누구도 고개를 들지 않았다.'],
     from: [0.5, 0.42, 1.04],
     to: [0.5, 0.55, 1.14],
     fx: 'dust',
@@ -659,7 +659,7 @@ const PAGES: Page[] = [
   },
   // 7. 보도블록 틈의 꽃 (낮은 시점)
   {
-    lines: ['그리고 어느 날, 갈라진 보도블록 틈에서', '작은 꽃 한 송이가 피어났다.'],
+    lines: ['그리고 어느 날, 갈라진 보도블록 틈으로', '아주 작은 색 하나가 고개를 내밀었다.'],
     from: [0.5, 0.64, 1.3],
     to: [0.5, 0.66, 1.06],
     fx: 'sparks',
@@ -704,7 +704,7 @@ const PAGES: Page[] = [
   },
   // 8. 굳어 있던 한 주민이 손을 뻗었다
   {
-    lines: ['굳어 있던 한 주민이,', '그 꽃에 손을 뻗었다.'],
+    lines: ['굳어 있던 한 사람이, 까닭도 모른 채', '그 작은 빛을 향해 몸을 굽혔다.'],
     from: [0.5, 0.56, 1.18],
     to: [0.58, 0.64, 1.42],
     fx: 'sparks',
@@ -752,7 +752,7 @@ const PAGES: Page[] = [
   },
   // 9. 관절이 처음으로 풀렸다
   {
-    lines: ['그 순간 — 멈춰 있던 관절이,', '처음으로 풀렸다.'],
+    lines: ['손끝에 색이 닿는 순간, 굳은 관절이 풀리고', '멈춰 있던 마음이 — 다시, 뛰기 시작했다.'],
     from: [0.5, 0.52, 1.02],
     to: [0.5, 0.47, 1.2],
     fx: 'swirl',
@@ -782,13 +782,13 @@ const PAGES: Page[] = [
       drawGlow(c, 640, 360, 300, PETAL_COLORS, 1.0);
       const j = person(f, 600, GY, 290, (p) => {
         applyIdle(p, 0.6, 1, 0);
-        p.turn = 0.35;
-        p.headTilt = -0.32;
-        p.lean = -0.04;
-        p.arms[0].a = 1.15;
-        p.arms[0].b = 1.45;
-        p.arms[1].a = -0.35;
-        p.arms[1].b = 0.4;
+        // 정면: 꽃 든 팔은 높이 들고, 다른 팔도 몸에서 풀려 벌어진다
+        p.turn = 0;
+        p.headTilt = -0.18;
+        p.arms[0].a = 1.85;
+        p.arms[0].b = 0.45;
+        p.arms[1].a = 0.42;
+        p.arms[1].b = 0;
       }, { flower: true, flowerSize: 40 });
       composite(c, f);
       const [hx, hy] = j.hand[0];
@@ -1128,7 +1128,7 @@ export class StoryScene implements Scene {
     ctx.strokeRect(fx - 3, fy - 3, fw + 6, fh + 6);
     // 내레이션: 가운데 정렬, 글자가 하나씩 부드럽게 떠오른다
     const size = Math.round(Math.min(32, s.W / 46));
-    ctx.font = `400 ${size}px ${KR}`;
+    ctx.font = `500 ${size}px ${SERIF}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     const lh = size * 1.7;

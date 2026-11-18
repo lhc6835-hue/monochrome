@@ -152,7 +152,9 @@ export interface LevelDef {
   fallCause?: 'fall' | 'erase';
   /** 여백이 지운 자리의 색 (기본 흰 종이). 흰 땅에서는 회색 빈칸 */
   eraseColor?: string;
-  customPrompt?: (g: GameAPI) => { text: string; x: number; y: number; act: () => void } | null;
+  customPrompt?: (g: GameAPI) => { text: string; x: number; y: number; act: () => void; hold?: number } | null;
+  /** 화면 위에 덧그리기 (크레딧 등, 화면 좌표) */
+  drawOverlay?: (ctx: CanvasRenderingContext2D, g: GameAPI, W: number, H: number) => void;
 }
 
 /** 엔티티/스크립트가 사용하는 게임 인터페이스 */
@@ -211,6 +213,15 @@ export interface BlankCtl {
   hand: [number, number] | null;
   /** 다른 팔 [a, b] */
   hand2?: [number, number];
+  /** 발끝부터 지워진 정도 (0..1) */
+  erase?: number;
+  /** 끓던 연필 윤곽이 멈춘다 */
+  still?: boolean;
+  /** 가슴에 차오르는 색 (0..1) */
+  glow?: number;
+  alpha?: number;
+  /** 크기 (기본 430) */
+  scale?: number;
 }
 export interface CamFocus {
   x: number;

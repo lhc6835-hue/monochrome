@@ -11,7 +11,7 @@ import { LitPlank } from './entities7';
 import { audio } from '../core/audio';
 import { clamp, ease, hash1, lerp, TAU } from '../core/math';
 import { app } from '../app';
-import { drawBlankFigure, PAPER } from '../gfx/blank';
+import { drawBlankFigure, drawBlankHand } from '../gfx/blank';
 import { rigidPose } from '../gfx/figure';
 
 // ------------------------------------------------------------------
@@ -148,7 +148,7 @@ export class Hands extends Entity {
     }
     this.slams = this.slams.filter((s) => s.t < s.warn + 0.9);
   }
-  drawFront(ctx: CanvasRenderingContext2D) {
+  drawFront(ctx: CanvasRenderingContext2D, g: GameAPI) {
     for (const s of this.slams) {
       // 그림자 (점점 짙어지며 좁아진다)
       const k = clamp(s.t / s.warn);
@@ -163,28 +163,10 @@ export class Hands extends Entity {
       const after = s.t - s.warn;
       const y = after < 0 ? lerp(-1400, -700, ease.inQuad(k)) : after < 0.08 ? lerp(-700, 0, after / 0.08) : after < 0.55 ? 0 : lerp(0, -1400, ease.inQuad((after - 0.55) / 0.35));
       if (y < -1350) continue;
-      ctx.save();
-      ctx.translate(s.x, y);
-      ctx.fillStyle = PAPER;
-      ctx.strokeStyle = 'rgba(25,25,24,0.75)';
-      ctx.lineWidth = 3;
-      // 손목에서 위로 이어지는 팔
-      ctx.beginPath();
-      ctx.roundRect(-46, -1400, 92, 1290, 30);
-      ctx.fill();
-      ctx.stroke();
-      // 손바닥과 손가락 넷
-      ctx.beginPath();
-      ctx.roundRect(-88, -150, 176, 120, 40);
-      ctx.fill();
-      ctx.stroke();
-      for (let i = 0; i < 4; i++) {
-        ctx.beginPath();
-        ctx.roundRect(-82 + i * 44, -50, 36, 52 + (i === 1 || i === 2 ? 8 : 0), 16);
-        ctx.fill();
-        ctx.stroke();
-      }
-      ctx.restore();
+      // 활짝 편 손이 손끝부터 땅을 짚는다 (팔뚝은 위로)
+      const size = 175;
+      const len = size * 1.12;
+      drawBlankHand(ctx, s.x, y - len, size, 0, g.t, { curl: after < 0 ? 0.15 : 0.05, spread: after < 0 ? 1.0 : 1.5, arm: 1300 });
     }
   }
   save() {

@@ -7,6 +7,7 @@ import { audio } from '../core/audio';
 import { clamp, damp, ease, lerp, noise1 } from '../core/math';
 import { applyIdle, applyRunCycle, clonePose, drawFigure, lerpPose, plantLegs, reachIK, rigidPose, defaultStyle, type Pose, type Joints } from '../gfx/figure';
 import { drawFlower, drawGlow, PETAL_COLORS } from '../gfx/flower';
+import { drawBlankFigure } from '../gfx/blank';
 
 export const PH = {
   RUN: 335,
@@ -106,6 +107,10 @@ export class Player implements PlayerLike {
   submerge = 0;
   /** 물 위에 떠서 헤엄치는 중 */
   swimming = false;
+  /** 연출: 픽토그램으로 굳어 있게 한다 */
+  forceFreeze = false;
+  /** 연출: 몸이 하얗게 비어 연필 윤곽만 남는다 (0..1) */
+  hollow = 0;
   ladder: LadderLike | null = null;
   private climbPhase = 0;
   private hopT = 0;
@@ -289,10 +294,11 @@ export class Player implements PlayerLike {
         audio.play('click4', { vol: 0.35, rate: 0.6, delay: 0.08 });
       }
     } else if (!downHeld) this.freezeHold = 0;
+    if (this.forceFreeze && (this.state === 'normal' || this.state === 'scripted')) this.state = 'freeze';
     if (this.state === 'freeze') {
       ax = 0;
-      this.freezeAmt = Math.min(1, this.freezeAmt + dt / 0.2);
-      if (!downHeld) {
+      this.freezeAmt = Math.min(1, this.freezeAmt + dt / (this.forceFreeze ? 2.4 : 0.2));
+      if (!downHeld && !this.forceFreeze) {
         this.state = 'normal';
         audio.play('click1', { vol: 0.3, rate: 1.1 });
       }
@@ -886,6 +892,7 @@ export class Player implements PlayerLike {
       ctx.rotate(ra);
       ctx.translate(-cx, -cy);
     }
+    if (this.hollow > 0.01) st.alpha *= 1 - this.hollow;
     this.joints = drawFigure(ctx, this.pose, fx, fy, PH.SCALE, st, {
       heldBehind: hide,
       held:
@@ -902,6 +909,8 @@ export class Player implements PlayerLike {
             }
           : undefined,
     });
+    // 하얗게 비어 가는 몸: 여백처럼 끓는 연필 윤곽
+    if (this.hollow > 0.01) drawBlankFigure(ctx, this.pose, fx, fy, PH.SCALE, g.t, this.hollow);
     if (rolling) ctx.restore();
   }
 

@@ -180,3 +180,94 @@ export function blankReach(P: Pose, i: 0 | 1, bx: number, by: number, scale: num
   P.arms[i].b = Math.max(0, best![1]);
   return [sx + vx, sy + vy];
 }
+
+/**
+ * 여백의 손 (흰 몸 + 끓는 연필 윤곽). 손목 (x, y) 에서 angle 방향(0 = 아래)으로 손가락이 뻗는다.
+ *  size = 손바닥 너비, curl = 0(활짝 폄) ~ 1(움켜쥠), arm = 손목에서 반대쪽으로 뻗는 팔뚝 길이.
+ *  각 부분을 둥근 막대로 겹쳐 그린다: 어두운 굵은 선을 먼저 모두 긋고 흰 선을 위에 덮어, 바깥 윤곽만 남긴다.
+ */
+export function drawBlankHand(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, angle: number, t: number, opts: { curl?: number; arm?: number; spread?: number; flip?: boolean; alpha?: number } = {}) {
+  const curl = opts.curl ?? 0;
+  const spread = opts.spread ?? 1;
+  const s = size;
+  const fl = opts.flip ? -1 : 1;
+  // 손 좌표: 손목 (0,0), 손끝 방향 +y
+  type Seg = { a: [number, number]; b: [number, number]; w: number };
+  const segs: Seg[] = [];
+  // 팔뚝 (손목에서 위로, 팔꿈치 쪽이 조금 굵다)
+  if (opts.arm) {
+    segs.push({ a: [0, 0], b: [0, -opts.arm * 0.5], w: s * 0.42 });
+    segs.push({ a: [0, -opts.arm * 0.5], b: [0, -opts.arm], w: s * 0.5 });
+  }
+  // 손바닥: 손목 쪽은 좁고 손가락 마디 쪽은 넓다
+  segs.push({ a: [0, s * 0.05], b: [0, s * 0.5], w: s * 0.62 });
+  segs.push({ a: [-s * 0.18 * fl, s * 0.35], b: [s * 0.18 * fl, s * 0.35], w: s * 0.5 });
+  // 손가락 넷: 검지 ~ 새끼, 길이와 벌어짐이 다르다. 굽힐 때는 두 마디로 접힌다
+  const fingers: [number, number, number][] = [
+    // 마디 x, 길이, 벌어짐
+    [-0.27, 0.5, -0.1],
+    [-0.09, 0.58, -0.03],
+    [0.09, 0.54, 0.04],
+    [0.26, 0.42, 0.12],
+  ];
+  for (const [fx, len, sp] of fingers) {
+    const bx = fx * s * fl,
+      by = s * 0.58;
+    const a1 = sp * spread * fl;
+    const l1 = len * s * 0.55,
+      l2 = len * s * 0.5;
+    const mx = bx + Math.sin(a1) * l1,
+      my = by + Math.cos(a1) * l1;
+    // 둘째 마디는 손바닥 쪽으로 굽는다
+    const a2 = a1 - curl * 1.9 * fl;
+    const ex = mx + Math.sin(a2) * l2,
+      ey = my + Math.cos(a2) * l2;
+    segs.push({ a: [bx, by], b: [mx, my], w: s * 0.17 });
+    segs.push({ a: [mx, my], b: [ex, ey], w: s * 0.15 });
+  }
+  // 엄지: 손바닥 옆에서 비스듬히
+  {
+    const bx = -0.3 * s * fl,
+      by = s * 0.22;
+    const a1 = (-0.75 + curl * 0.6) * fl;
+    const mx = bx + Math.sin(a1) * s * 0.26,
+      my = by + Math.cos(a1) * s * 0.26;
+    const a2 = a1 + (0.5 + curl * 0.9) * fl;
+    segs.push({ a: [bx, by], b: [mx, my], w: s * 0.19 });
+    segs.push({ a: [mx, my], b: [mx + Math.sin(a2) * s * 0.2, my + Math.cos(a2) * s * 0.2], w: s * 0.16 });
+  }
+  const frame = Math.floor(t * 12);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(-angle);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha *= opts.alpha ?? 1;
+  const line = (sg: Seg, w: number, jx = 0, jy = 0) => {
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.moveTo(sg.a[0] + jx, sg.a[1] + jy);
+    ctx.lineTo(sg.b[0] + jx, sg.b[1] + jy);
+    ctx.stroke();
+  };
+  // 연필 윤곽: 조금씩 어긋나게 여러 번
+  const ow = Math.max(2.5, s * 0.035);
+  for (let k = 0; k < 3; k++) {
+    const jx = (hash1(frame * 7.1 + k * 3.3) - 0.5) * s * 0.03;
+    const jy = (hash1(frame * 3.7 + k * 9.1) - 0.5) * s * 0.03;
+    ctx.strokeStyle = k === 0 ? 'rgba(20,20,20,0.85)' : 'rgba(20,20,20,0.35)';
+    for (const sg of segs) line(sg, sg.w + ow * 2, jx, jy);
+  }
+  ctx.strokeStyle = '#fdfdfb';
+  for (const sg of segs) line(sg, sg.w);
+  // 손가락 사이의 옅은 주름
+  ctx.strokeStyle = 'rgba(60,60,58,0.35)';
+  ctx.lineWidth = Math.max(1, s * 0.012);
+  for (const fx of [-0.18, 0, 0.18]) {
+    ctx.beginPath();
+    ctx.moveTo(fx * s * fl, s * 0.5);
+    ctx.lineTo(fx * s * fl, s * 0.62);
+    ctx.stroke();
+  }
+  ctx.restore();
+}

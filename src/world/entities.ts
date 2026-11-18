@@ -376,6 +376,20 @@ export class Resident extends Entity {
     const solids = g.solids().filter((s) => s.owner !== this);
     b.h = this.state === 'crawl' ? 44 : this.scale * 0.92;
     moveBody(b, b.vx * dt, b.vy * dt, solids, { kid: this.kid, ignore: this });
+    // 낮은 턱(36px 이하)은 걸어서 올라선다
+    if (b.onGround && (b.hitR || b.hitL) && Math.abs(moveX) > 20) {
+      const dir = b.hitR ? 1 : -1;
+      const fx = b.x + dir * (b.w / 2 + 3);
+      for (const so of solids) {
+        if (so.oneway || fx < so.x || fx > so.x + so.w) continue;
+        const rise = b.y - so.y;
+        if (rise > 0 && rise <= 36) {
+          b.y = so.y - 0.5;
+          b.x += dir * 3;
+          break;
+        }
+      }
+    }
     if (b.onGround) b.vy = 0;
     if (Math.abs(b.vx) > 20) this.facing = Math.sign(b.vx);
     // 발소리

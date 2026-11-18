@@ -9,7 +9,7 @@ import { drawSky, drawLayers, type BgTheme } from '../gfx/background';
 import { drawIcon, type IconName } from '../gfx/icons';
 import { drawBlock, drawGroundSlab, drawCrack, INK } from '../gfx/ground';
 import { drawFlower, drawGlow, drawPetal, PETAL_COLORS } from '../gfx/flower';
-import { blankReach, drawBlankFigure, drawErasedRegion, PAPER } from '../gfx/blank';
+import { blankReach, drawBlankFigure, drawBlankHand, drawErasedRegion, PAPER } from '../gfx/blank';
 import { drawMemory } from '../gfx/memoryArt';
 import { plantLegs, rigidPose } from '../gfx/figure';
 import { Player, PH } from '../world/player';
@@ -95,6 +95,9 @@ export class GameScene implements Scene, GameAPI {
   blankCtl: BlankCtl | null = null;
   /** 붙잡힘 연출 (-1 = 없음) */
   private grabT = -1;
+  private stillT = -1;
+  /** 마지막 구간의 엔딩 (null = 아직) */
+  finale: 'bad' | 'normal' | 'true' | null = null;
   private grabFrom: [number, number] = [0, 0];
   private grabHand0: [number, number] = [0, 0];
   private grabBx0 = 0;
@@ -169,7 +172,7 @@ export class GameScene implements Scene, GameAPI {
     this.hasEcho = this.ents.some((e) => e instanceof Echo);
     // 근경 실루엣
     const rng = mulberry32(5);
-    for (let x = -1200; x < 0; x += 900 + rng() * 1300) {
+    for (let x = -1200; x < 0 && this.level.id !== 'blank' && this.level.id !== 'field'; x += 900 + rng() * 1300) {
       this.fg.push({ icon: rng() < 0.5 ? 'lamp' : rng() < 0.5 ? 'tree' : 'pine', x, h: 420 + rng() * 200 });
     }
   }
@@ -409,6 +412,16 @@ export class GameScene implements Scene, GameAPI {
     this.memT = 0;
     audio.muffle(0.5, 0.6);
     audio.play('bell1', { vol: 0.35, rate: 0.8 });
+  }
+  /** 엔딩을 마친다 */
+  finish(route: 'bad' | 'normal' | 'true') {
+    this.finale = route;
+    this.cineFade = 0;
+    this.camFocus = null;
+    this.flags.add('ending:' + route);
+    this.mode = 'ending';
+    this.endT = 0;
+    this.persist();
   }
   endSlice() {
     this.mode = 'ending';
@@ -720,7 +733,7 @@ export class GameScene implements Scene, GameAPI {
         }
       }
       const cp = this.level.customPrompt?.(this) ?? null;
-      if (cp && !best) best = { p: { text: cp.text, hold: 0 }, x: cp.x, y: cp.y, act: cp.act };
+      if (cp && !best) best = { p: { text: cp.text, hold: cp.hold ?? 0 }, x: cp.x, y: cp.y, act: cp.act };
     }
     this.prompt = best;
     this.promptActive = !!best && !best.p.disabled;
@@ -1114,6 +1127,10 @@ export class GameScene implements Scene, GameAPI {
     if (this.fadeA > 0) app.post.fill(s, this.fadeColor, this.fadeA);
     if (this.cpFlash > 0) app.post.fill(s, '#ffffff', this.cpFlash * 0.05);
 
+    if (this.level.drawOverlay) {
+      s.base(ctx);
+      this.level.drawOverlay(ctx, this, s.W, s.H);
+    }
     if (this.mode === 'memory') drawMemory(s, this.memArt, this.memT, clamp(this.memT / 0.5));
     if (this.mode === 'ending') this.drawEnding();
     if (this.cineFade > 0 && this.mode !== 'transition') app.post.fill(s, this.cineFadeColor, this.cineFade);
@@ -1621,6 +1638,7 @@ export class GameScene implements Scene, GameAPI {
     P.headTilt = Math.sin(this.t * 0.9) * 0.08;
     let bx = c.front - 60;
     let by = lerp(260, -20 + Math.sin(this.t * 1.7) * 14, ease.outCubic(rise));
+    B.scale = this.blankCtl?.scale ?? 430;
     const S = B.scale;
     let hand: [number, number] | null = null;
 
@@ -1720,8 +1738,31 @@ export class GameScene implements Scene, GameAPI {
     s.clearLayer(L);
     cam.apply(L.ctx, s, 1);
     const B = this.blank;
-    drawBlankFigure(L.ctx, B.P, B.bx, B.by, B.scale, this.t);
+    const ctl = this.blankCtl;
+    if (ctl?.still && this.stillT < 0) this.stillT = this.t;
+    if (!ctl?.still) this.stillT = -1;
+    drawBlankFigure(L.ctx, B.P, B.bx, B.by, B.scale, ctl?.still ? this.stillT : this.t, ctl?.alpha ?? 1);
+    // 발끝부터 지워진다 (아래 composite 전에 레이어에서 잘라낸다)
+    if (ctl?.erase && ctl.erase > 0) {
+      L.ctx.save();
+      L.ctx.globalCompositeOperation = 'destination-out';
+      const cut = B.by - B.scale * 1.08 * ctl.erase;
+      const grad = L.ctx.createLinearGradient(0, cut - 30, 0, cut + 30);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(0,0,0,1)');
+      L.ctx.fillStyle = grad;
+      L.ctx.fillRect(B.bx - 800, cut - 30, 1600, B.by - cut + 200);
+      L.ctx.restore();
+    }
     s.composite(L);
+    // 가슴에 색이 차오른다
+    if (ctl?.glow && ctl.glow > 0.01) {
+      cam.apply(ctx, s, 1);
+      const cx = B.bx + B.scale * 0.03,
+        cy = B.by - B.scale * 0.64;
+      drawGlow(ctx, cx, cy, B.scale * 0.5 * ctl.glow, PETAL_COLORS, ctl.glow);
+      drawPetal(ctx, cx, cy, B.scale * 0.05 * ctl.glow, PETAL_COLORS[(Math.floor(this.t * 2) % 7)], this.t * 0.4);
+    }
     // 붙잡힌 몸은 흰 종이 위로 보이게 다시 그리고, 그 위를 여백의 손가락이 감싼다
     if (this.grabT >= 0.12 && this.player.state === 'dead') {
       const F = app.figLayer;
@@ -1732,25 +1773,17 @@ export class GameScene implements Scene, GameAPI {
       const fade = 1 - clamp((this.player.deathT - 1.05) / 0.35);
       if (fade > 0) {
         cam.apply(ctx, s, 1);
-        const r = B.scale * 0.05;
+        // 여백의 손이 가슴을 감싸 쥔다 (팔이 뻗어 온 방향으로)
         const [hx, hy] = B.hand;
+        const sx = B.bx + B.scale * 0.08,
+          sy = B.by - B.scale * 0.68;
+        const dx = hx - sx,
+          dy = hy - sy;
+        const dl = Math.hypot(dx, dy) || 1;
+        const size = B.scale * 0.14;
         ctx.save();
         ctx.globalAlpha = fade;
-        ctx.fillStyle = PAPER;
-        ctx.strokeStyle = 'rgba(20,20,20,0.6)';
-        ctx.lineWidth = 2.2;
-        // 손바닥과 감아쥔 손가락 셋
-        ctx.beginPath();
-        ctx.ellipse(hx - 6, hy, r * 1.05, r * 0.9, 0.3, 0, TAU);
-        ctx.fill();
-        ctx.stroke();
-        for (let k = 0; k < 3; k++) {
-          ctx.beginPath();
-          ctx.ellipse(hx + r * 0.75, hy - r * 0.55 + k * r * 0.55, r * 0.5, r * 0.26, 0.15, 0, TAU);
-          ctx.fill();
-          ctx.stroke();
-        }
-        ctx.restore();
+        drawBlankHand(ctx, hx - (dx / dl) * size * 0.45, hy - (dy / dl) * size * 0.45, size, Math.atan2(dx, dy), this.t, { curl: 0.95, spread: 0.6 });
       }
     }
   }
@@ -1851,6 +1884,10 @@ export class GameScene implements Scene, GameAPI {
       ctx.font = `300 ${size}px ${KR}`;
       ctx.fillText(txt, s.W / 2, y);
     };
+    if (this.finale) {
+      this.drawFinale(line, t);
+      return;
+    }
     let savable = 0,
       mems = 0;
     for (const id of LEVEL_ORDER) {
@@ -1873,6 +1910,58 @@ export class GameScene implements Scene, GameAPI {
     line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${this.memories.size} / ${mems}`, s.H * 0.5, 4.0, 19, '#8d8d8a');
     line('— 여기까지가 현재 개발된 부분입니다 —', s.H * 0.6, 5.5, 18, '#6f6f6c');
     if (t > 8) line('아무 키나 누르면 타이틀로 돌아갑니다', s.H * 0.8, 8, 16, '#5a5a57');
+    ctx.globalAlpha = 1;
+  }
+
+  /** 마지막 엔딩 카드 */
+  private drawFinale(line: (txt: string, y: number, t0: number, size?: number, color?: string) => void, t: number) {
+    const s = app.screen;
+    const ctx = s.ctx;
+    let savable = 0,
+      mems = 0;
+    for (const id of LEVEL_ORDER) {
+      const lv = LEVELS[id];
+      savable += lv.entities.filter((d) => d.type === 'resident' && d.savable).length;
+      mems += lv.entities.filter((d) => d.type === 'memory' && d.id !== 'm_firsteye').length;
+    }
+    const T: Record<string, [string, string]> = {
+      bad: ['다음 여백', '혼자서 보는 색은, 오래 남지 않았다.'],
+      normal: ['바깥의 여백', '꽃밭은 피었다. 경계 바깥의 한 사람만 빼고.'],
+      true: ['첫 번째 눈', '누군가 봐 주기를 바랐던 사람에게, 마지막 꽃잎이 닿았다.'],
+    };
+    const [title, sub] = T[this.finale!];
+    // 배드 엔딩: 오프닝의 보도블록 틈, 새 꽃, 그 뒤의 하얀 그림자
+    if (this.finale === 'bad') {
+      const a = clamp((t - 0.5) / 2);
+      ctx.save();
+      ctx.globalAlpha = a;
+      const cx = s.W / 2,
+        gy = s.H * 0.3;
+      ctx.fillStyle = '#e9e8e3';
+      ctx.fillRect(cx - 260, gy, 520, 4);
+      ctx.strokeStyle = '#e9e8e3';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - 30, gy + 2);
+      ctx.lineTo(cx - 10, gy + 10);
+      ctx.lineTo(cx + 6, gy + 4);
+      ctx.lineTo(cx + 26, gy + 12);
+      ctx.stroke();
+      drawFlower(ctx, cx, gy, 26, PETAL_COLORS, { stem: 1, sway: Math.sin(t * 1.4) * 0.05 });
+      const L = app.fxLayer;
+      s.clearLayer(L);
+      s.base(L.ctx);
+      const P = rigidPose();
+      drawBlankFigure(L.ctx, P, cx + 120, gy, 150, t, clamp((t - 2.5) / 2));
+      s.composite(L);
+      ctx.restore();
+    }
+    const y0 = this.finale === 'bad' ? s.H * 0.5 : s.H * 0.36;
+    line(title, y0, 1.0, 44, '#efefec');
+    line(sub, y0 + 60, 2.6, 22);
+    line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${Math.min(this.memories.size, mems)} / ${mems}`, y0 + 130, 4.2, 18, '#8d8d8a');
+    line('끝', y0 + 210, 5.6, 24, '#d8d8d5');
+    if (t > 8) line('아무 키나 누르면 타이틀로 돌아갑니다', s.H * 0.86, 8, 16, '#5a5a57');
     ctx.globalAlpha = 1;
   }
 

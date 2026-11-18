@@ -343,3 +343,24 @@ export function blankTheme(width: number, seed = 88): BgTheme {
   };
   return { skyTop: '#f4f3ef', skyMid: '#f2f1ed', skyBot: '#ecebe6', layers: [far, mid] };
 }
+
+/** 꽃밭: 낮은 언덕과 넓은 하늘. 멀리 아무것도 없다 */
+export function meadowTheme(width: number, seed = 99): BgTheme {
+  const rng = mulberry32(seed);
+  const far: BgLayer = {
+    p: 0.1,
+    color: '#c9c8c3',
+    ground: 40,
+    band: '#c3c2bd',
+    haze: 0.2,
+    items: scatter(rng, -1200, width * 0.1 + 2600, 900, 1800, (x) => ({ icon: 'tree2' as IconName, x, h: 90 + rng() * 60 })),
+  };
+  const mid: BgLayer = {
+    p: 0.3,
+    color: '#aeada8',
+    ground: 90,
+    band: '#a8a7a2',
+    items: [],
+  };
+  return { skyTop: '#d4d3ce', skyMid: '#dedddA'.toLowerCase(), skyBot: '#cfcec9', layers: [far, mid] };
+}

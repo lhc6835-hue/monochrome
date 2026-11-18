@@ -278,7 +278,39 @@ function hideArt(): Stroke[] {
   return S;
 }
 
-const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt, station: stationArt, together: togetherArt, alone: aloneArt, hide: hideArt };
+/** 첫 번째 눈: 반쯤 하얗게 빈 정원사가 보도블록 틈에 무릎 꿇고 꽃씨 하나를 떨어뜨린다 (오프닝의 그 자리) */
+function firstEyeArt(): Stroke[] {
+  const S: Stroke[] = [];
+  // 보도블록
+  S.push({ pts: [[-440, 190], [440, 190]], color: GRAY, w: 5 });
+  for (let x = -420; x < 440; x += 120) S.push({ pts: [[x, 190], [x, 230]], color: '#a3a39f', w: 3 });
+  S.push({ pts: [[-440, 230], [440, 230]], color: '#a3a39f', w: 3 });
+  // 틈 (오프닝과 같은 모양)
+  S.push({ pts: [[60, 190], [72, 200], [66, 210], [82, 222], [78, 230]], color: DARK, w: 3 });
+  // 정원사: 몸의 오른쪽 절반은 이미 비어 점선만 남았다
+  const ghost = '#b4b4b0';
+  S.push({ pts: circle(-40, -70, 34), color: DARK, w: 5 });
+  for (let k = 0; k < 12; k++) {
+    const a = -Math.PI / 2 + (k / 12) * Math.PI;
+    S.push({ pts: [[-40 + Math.cos(a) * 36, -70 + Math.sin(a) * 36], [-40 + Math.cos(a + 0.12) * 36, -70 + Math.sin(a + 0.12) * 36]], color: ghost, w: 4 });
+  }
+  S.push({ pts: [[-44, -36], [-56, 70]], color: DARK, w: 6 });
+  for (let y = -30; y < 70; y += 22) S.push({ pts: [[-26, y], [-28, y + 10]], color: ghost, w: 4 });
+  // 무릎 꿇은 다리
+  S.push({ pts: [[-56, 70], [-10, 96], [-14, 188]], color: DARK, w: 6 });
+  S.push({ pts: [[-56, 70], [-96, 188]], color: ghost, w: 5 });
+  // 틈으로 뻗은 손, 떨어지는 꽃씨
+  S.push({ pts: [[-46, 0], [20, 60], [54, 130]], color: DARK, w: 6 });
+  S.push({ pts: circle(64, 160, 6, 8), color: PETAL_COLORS[0], w: 4, fill: true });
+  S.push({ pts: [[60, 140], [62, 148]], color: '#c9c9c5', w: 2 });
+  // 가슴에 남은 마지막 꽃잎 하나 (흐릿하게)
+  S.push({ pts: circle(-44, 8, 7, 8), color: PETAL_COLORS[0], w: 3 });
+  // 멀리 굳은 사람들 (아이콘)
+  for (let i = 0; i < 4; i++) personAt(S, 220 + i * 52, 190, 0.45, '#8d8d89');
+  return S;
+}
+
+const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt, station: stationArt, together: togetherArt, alone: aloneArt, hide: hideArt, firsteye: firstEyeArt };
 const cache = new Map<string, Stroke[]>();
 
 export function drawMemory(s: Screen, art: string, t: number, alpha: number) {

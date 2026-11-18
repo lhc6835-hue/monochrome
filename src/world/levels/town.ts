@@ -7,7 +7,9 @@
  *  E. 광장 (여백의 등장)             7300 ~ 7700
  *  F. 추격전                          7700 ~ 11400
  */
-import type { LevelDef, GameAPI, SolidDef, DecorDef, EntityDef, TriggerDef } from '../types';
+import type { LevelDef, GameAPI, SolidDef, DecorDef, EntityDef, TriggerDef, BlankCtl, CamFocus } from '../types';
+import type { Player } from '../player';
+import { clamp, ease, lerp } from '../../core/math';
 import type { Co } from '../../core/co';
 import { townTheme } from '../../gfx/background';
 import { audio } from '../../core/audio';
@@ -144,6 +146,8 @@ const triggers: TriggerDef[] = [
   { id: 'cp_e', x: 7330, w: 80, checkpoint: true, spawnX: 7360 },
   { id: 'chase', x: 7620, w: 60, once: true, script: 'chase' },
   { id: 'h_slide', x: 8700, w: 60, once: true, hint: { kb: '달리면서 {down}   구르기', touch: '달리면서 굳기 버튼   구르기', dur: 2.2 } },
+  // 구덩이 앞: 저절로 뛰어들고, 여백의 손이 머리 위를 아슬아슬하게 스친다
+  { id: 'escape', x: 10540, w: 60, once: true, script: 'escape' },
   { id: 'end', x: 10760, w: 200, y: 20, h: 800, once: true, script: 'end' },
 ];
 
@@ -184,7 +188,123 @@ function* chase(g: GameAPI): Co {
   g.hint('→', '→', 1.5);
 }
 
+/** 연출에 필요한 장면 내부 (GameScene) */
+interface Cine {
+  chase: { front: number; cine: boolean };
+  blankCtl: BlankCtl | null;
+  timeScale: number;
+  camFocus: CamFocus | null;
+  cineFade: number;
+  dt: number;
+  parts: { paper(x: number, y: number, n: number, s: number): void };
+  co: { running(tag: string): boolean };
+}
+
+const EDGE = 10760;
+
+function* escape(g: GameAPI): Co {
+  if (!g.chaseActive()) return;
+  const S = g as unknown as Cine;
+  const p = g.player as unknown as Player;
+  const b = p.body;
+  g.setControl(false);
+  S.chase.cine = true;
+  // 1. 구덩이 끝까지 저절로 달린다. 여백은 바짝 따라붙는다
+  p.state = 'scripted';
+  p.scriptTarget = EDGE - 10;
+  p.scriptSpeed = 335;
+  let bx = S.chase.front - 60;
+  const cam: CamFocus = { x: b.x + 60, y: -300, zoom: 0.84, smooth: 0.5 };
+  S.camFocus = cam;
+  while (b.x < EDGE - 26) {
+    bx = Math.min(bx + 470 * S.dt, b.x - 290);
+    S.chase.front = bx + 60;
+    cam.x = (b.x + bx) / 2 + 150;
+    yield;
+  }
+  // 2. 뛰어든다
+  // (조작은 꺼진 채 '연출 이동' 상태로 앞으로 몸을 던진다)
+  p.facing = 1;
+  p.scriptTarget = EDGE + 110;
+  p.scriptSpeed = 150;
+  b.vy = -760;
+  b.vx = 150;
+  audio.play('swish2', { vol: 0.8 });
+  audio.step(0, 0.5);
+  const bx0 = bx;
+  const T_MISS = 0.5;
+  let t = 0;
+  let missed = false;
+  let hand: [number, number] = [bx + 200, -300];
+  const ctl: BlankCtl = { bx, by: -20, lean: 0.3, crouch: 0, head: 0.1, hand: null };
+  S.blankCtl = ctl;
+  audio.muffle(0.55, 0.3);
+  while (t < 1.3) {
+    const dt = S.dt;
+    t += dt;
+    // 느린 화면: 손이 덮쳐 오는 순간부터 빗나갈 때까지
+    S.timeScale = t < 0.3 ? lerp(1, 0.2, ease.inOutSine(clamp((t - 0.16) / 0.14))) : t < 0.66 ? 0.2 : lerp(0.2, 1, ease.inOutSine(clamp((t - 0.66) / 0.22)));
+    // 여백이 구덩이 끝까지 덮쳐 오며 몸을 숙이고 웅크린다
+    // (서 있는 채로 가장자리까지 와서 상체를 크게 숙인다 — 팔 길이가 딱 정수리 위에서 모자라게)
+    ctl.bx = lerp(bx0, EDGE - 135, ease.outCubic(clamp(t / 0.35)));
+    ctl.crouch = 0;
+    ctl.lean = lerp(0.3, 0.62, ease.inOutSine(clamp((t - 0.2) / 0.3)));
+    ctl.head = lerp(0.1, 0.5, clamp(t / 0.5));
+    ctl.hand2 = [lerp(1.0, 0.6, clamp(t / 0.5)), 0.4];
+    S.chase.front = Math.min(ctl.bx + 90, EDGE);
+    // 손: 머리 위로 치켜들었다가 → 정수리를 향해 내리꽂고 → 땅 높이에서 막혀 허공을 움켜쥔다
+    const top: [number, number] = [b.x + 4, b.y - 140];
+    let target: [number, number];
+    if (t < 0.3) target = [lerp(ctl.bx + 150, ctl.bx + 10, t / 0.3), lerp(-380, -640, t / 0.3)];
+    else {
+      // 정수리를 향해 내리치지만 팔이 다 펴진 곳에서 멈추고, 몸은 그 아래로 빠져나간다
+      const k = clamp((t - 0.3) / (T_MISS - 0.3));
+      const gap = lerp(150, 6, ease.inQuad(k));
+      target = [top[0] + lerp(-120, 0, k), Math.min(top[1] - gap, 4)];
+    }
+    hand = [lerp(hand[0], target[0], 1 - Math.exp(-dt * 40)), lerp(hand[1], target[1], 1 - Math.exp(-dt * 40))];
+    ctl.hand = hand;
+    if (t > 0.3 && t - dt <= 0.3) audio.play('whoosh', { vol: 1, rate: 0.55 });
+    if (!missed && t >= T_MISS) {
+      missed = true;
+      audio.play('paper_crush', { vol: 1, rate: 0.7 });
+      audio.play('sting2', { vol: 0.8 });
+      S.parts.paper(hand[0], hand[1], 14, 1);
+      g.shake(0.3);
+    }
+    // 카메라: 덮쳐 오는 순간 바짝 다가가고, 빗나간 뒤에는 물러나며 떨어지는 몸을 따라간다
+    const close = t > 0.18 && t < 0.8;
+    cam.x = close ? EDGE - 10 : EDGE + 20;
+    cam.y = close ? -300 : Math.max(-250, b.y - 280);
+    cam.zoom = close ? 1.45 : 0.8;
+    cam.smooth = close ? 0.25 : 0.45;
+    yield;
+  }
+  S.timeScale = 1;
+  audio.muffle(0, 0.6);
+  // 3. 아래로 떨어져 가는 동안, 여백은 구덩이 가장자리에서 내려다보며 한 번 더 손을 뻗는다
+  t = 0;
+  while (S.cineFade < 1) {
+    const dt = S.dt;
+    t += dt;
+    ctl.head = lerp(ctl.head, 0.95, 1 - Math.exp(-dt * 3));
+    ctl.lean = lerp(ctl.lean, 1.05, 1 - Math.exp(-dt * 2));
+    const reach: [number, number] = [EDGE + 70 + Math.sin(t * 2.2) * 25, 60 + Math.sin(t * 1.3) * 10];
+    hand = [lerp(hand[0], reach[0], 1 - Math.exp(-dt * 3)), lerp(hand[1], reach[1], 1 - Math.exp(-dt * 3))];
+    ctl.hand = hand;
+    if (Math.random() < dt * 10) S.parts.paper(EDGE - 20 + Math.random() * 30, -10 - Math.random() * 60, 1, 0.8);
+    cam.y = Math.min(Math.max(-250, b.y - 280), 160);
+    if (b.y > 380) S.cineFade = Math.min(1, S.cineFade + dt / 1.0);
+    yield;
+  }
+  g.stopChase();
+  audio.play('land_hard', { vol: 0.7, delay: 0.4 });
+  g.goToLevel('drain');
+}
+
 function* end(g: GameAPI): Co {
+  // 추격 중이었다면 구덩이 연출(escape)이 이어서 처리한다
+  if ((g as unknown as Cine).co.running('escape')) return;
   g.stopChase();
   g.setControl(false);
   audio.play('land_hard', { vol: 0.7, delay: 0.5 });
@@ -215,7 +335,7 @@ export const town: LevelDef = {
     { x0: 7300, x1: 7700, zoom: 0.92 },
     { x0: 7700, x1: 11500, zoom: 0.88, lead: 300 },
   ],
-  scripts: { kidBye, chase, end, opening },
+  scripts: { kidBye, chase, escape, end, opening },
   startScript: 'opening',
   customPrompt: (g) => townCustomPrompt(g),
   ambience: () => {

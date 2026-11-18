@@ -145,7 +145,7 @@ export interface GameAPI {
   solids(): Solid[];
   entity<T = unknown>(id: string): T | undefined;
   hint(kb: string, touch?: string, dur?: number): void;
-  kill(cause: 'erase' | 'fall' | 'crush' | 'drown'): void;
+  kill(cause: 'erase' | 'fall' | 'crush' | 'drown' | 'grab'): void;
   /** 소리를 낸다 (메아리가 듣는다) */
   noise(x: number, y: number, r: number): void;
   /** 해당 위치의 물 (없으면 null) */
@@ -170,6 +170,25 @@ export interface GameAPI {
   showMemory(art: string): void;
   endSlice(): void;
   isDead(): boolean;
+}
+
+/** 연출이 여백(거대한 흰 인물)을 직접 움직일 때 */
+export interface BlankCtl {
+  bx: number;
+  by: number;
+  lean: number;
+  crouch?: number;
+  head: number;
+  /** 앞쪽 손이 뻗을 세계 좌표 (null = 평소 팔) */
+  hand: [number, number] | null;
+  /** 다른 팔 [a, b] */
+  hand2?: [number, number];
+}
+export interface CamFocus {
+  x: number;
+  y: number;
+  zoom: number;
+  smooth?: number;
 }
 
 export interface PlayerLike {

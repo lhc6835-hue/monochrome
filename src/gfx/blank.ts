@@ -126,3 +126,57 @@ export function drawPaperBit(ctx: CanvasRenderingContext2D, x: number, y: number
 }
 
 export const BLANK_TAU = TAU;
+
+let bctx: CanvasRenderingContext2D | null = null;
+function measureCtx() {
+  if (!bctx) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 2;
+    bctx = c.getContext('2d')!;
+  }
+  return bctx;
+}
+const wrapPi = (x: number) => x - Math.PI * 2 * Math.round(x / (Math.PI * 2));
+
+/**
+ * 여백(거대한 흰 인물)의 팔 i 를 세계 좌표 (tx, ty) 로 뻗게 한다. pose.turn 은 ±1 이어야 한다.
+ * 팔꿈치는 사람처럼 앞쪽으로만 접힌다. 닿지 않으면 그 방향으로 쭉 편다.
+ * 돌려주는 값: 실제 손 위치.
+ */
+export function blankReach(P: Pose, i: 0 | 1, bx: number, by: number, scale: number, tx: number, ty: number): [number, number] {
+  const j = drawFigure(measureCtx(), P, bx, by, scale);
+  const [sx, sy] = j.pts[4 + i];
+  const L1 = 0.17 * scale,
+    L2 = 0.17 * scale;
+  let vx = tx - sx,
+    vy = ty - sy;
+  let d = Math.hypot(vx, vy);
+  const maxD = (L1 + L2) * 0.999;
+  if (d > maxD) {
+    vx *= maxD / d;
+    vy *= maxD / d;
+    d = maxD;
+  }
+  d = Math.max(d, 1);
+  const base = Math.atan2(vy, vx);
+  const A = Math.acos(Math.max(-1, Math.min(1, (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d))));
+  const th = P.lean * (P.turn >= 0 ? 1 : -1);
+  const f = P.turn >= 0 ? 1 : -1;
+  let best: [number, number] | null = null;
+  for (const c of [base + A, base - A]) {
+    const ex = sx + Math.cos(c) * L1,
+      ey = sy + Math.sin(c) * L1;
+    const u2x = (sx + vx - ex) / L2,
+      u2y = (sy + vy - ey) / L2;
+    // dir(φ) = (-sin φ, cos φ)
+    const p1 = Math.atan2(-Math.cos(c), Math.sin(c));
+    const p2 = Math.atan2(-u2x, u2y);
+    const a = wrapPi((th - p1) * f);
+    const b = wrapPi((p1 - p2) * f);
+    // 팔꿈치가 앞으로 접히는 쪽 (b ≥ 0)
+    if (!best || b > best[1]) best = [a, b];
+  }
+  P.arms[i].a = best![0];
+  P.arms[i].b = Math.max(0, best![1]);
+  return [sx + vx, sy + vy];
+}

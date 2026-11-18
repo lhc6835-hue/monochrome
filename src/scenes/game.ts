@@ -9,9 +9,9 @@ import { drawSky, drawLayers, type BgTheme } from '../gfx/background';
 import { drawIcon, type IconName } from '../gfx/icons';
 import { drawBlock, drawGroundSlab, drawCrack, INK } from '../gfx/ground';
 import { drawFlower, drawGlow, drawPetal, PETAL_COLORS } from '../gfx/flower';
-import { drawBlankFigure, drawErasedRegion, PAPER } from '../gfx/blank';
+import { blankReach, drawBlankFigure, drawErasedRegion, PAPER } from '../gfx/blank';
 import { drawMemory } from '../gfx/memoryArt';
-import { rigidPose } from '../gfx/figure';
+import { plantLegs, rigidPose } from '../gfx/figure';
 import { Player, PH } from '../world/player';
 import { Box, Entity, Resident, type Prompt } from '../world/entities';
 import { createEntity } from '../world/factory';
@@ -19,7 +19,7 @@ import { Echo, Ladder, Shaft, Water, type Light } from '../world/entities2';
 import type { Recorder } from '../world/entities5';
 import { clonePose, defaultStyle, drawFigure, type Pose } from '../gfx/figure';
 import { moveBody, type Body, type Solid } from '../world/physics';
-import type { GameAPI, LevelDef, TriggerDef } from '../world/types';
+import type { BlankCtl, CamFocus, GameAPI, LevelDef, TriggerDef } from '../world/types';
 import { LEVELS, LEVEL_ORDER } from '../world/levels';
 import { settingsPanel } from './title';
 
@@ -86,7 +86,20 @@ export class GameScene implements Scene, GameAPI {
   private hintText = '';
   private hintT = 0;
   private hintDur = 0;
-  chase = { active: false, front: 0, speed: 0, t: 0, max: 318 };
+  chase = { active: false, front: 0, speed: 0, t: 0, max: 318, cine: false };
+  /** 여백(거대한 흰 인물)의 이번 프레임 모습 */
+  private blank = { bx: 0, by: 0, scale: 430, P: rigidPose(), hand: [0, 0] as [number, number] };
+  /** 연출이 여백의 몸과 손을 직접 움직일 때 */
+  blankCtl: BlankCtl | null = null;
+  /** 붙잡힘 연출 (-1 = 없음) */
+  private grabT = -1;
+  private grabFrom: [number, number] = [0, 0];
+  private grabHand0: [number, number] = [0, 0];
+  private grabBx0 = 0;
+  /** 연출: 느린 화면, 카메라 고정, 검게 닫히기 */
+  timeScale = 1;
+  camFocus: CamFocus | null = null;
+  cineFade = 0;
   trainSpeed = 0;
   /** 기록대 */
   recording = false;
@@ -249,8 +262,8 @@ export class GameScene implements Scene, GameAPI {
     this.nextLevel = id;
     audio.stopAllLoops(1.4);
   }
-  kill(cause: 'erase' | 'fall' | 'crush' | 'drown') {
-    if (this.mode !== 'play' || this.player.state === 'dead' || this.co.running('end')) return;
+  kill(cause: 'erase' | 'fall' | 'crush' | 'drown' | 'grab') {
+    if (this.mode !== 'play' || this.player.state === 'dead' || this.co.running('end') || this.co.running('escape')) return;
     this.player.die(cause);
     this.mode = 'dying';
     if (this.recording) {
@@ -260,8 +273,17 @@ export class GameScene implements Scene, GameAPI {
     }
     this.dieT = 0;
     this.deaths++;
-    this.fadeColor = cause === 'erase' ? PAPER : '#000';
-    if (cause === 'erase') {
+    this.fadeColor = cause === 'erase' || cause === 'grab' ? PAPER : '#000';
+    if (cause === 'grab') {
+      // 여백의 손이 뻗어 와 낚아챈다
+      this.grabT = 0;
+      this.grabFrom = [this.player.x, this.player.y];
+      this.grabHand0 = [...this.blank.hand];
+      this.grabBx0 = this.blank.bx;
+      audio.play('whoosh', { vol: 0.8, rate: 0.7 });
+      audio.play('paper_crush', { vol: 0.9, rate: 0.8, delay: 0.16 });
+      audio.play('sting1', { vol: 0.8, delay: 0.12 });
+    } else if (cause === 'erase') {
       audio.play('paper_rip', { vol: 0.9 });
       audio.play('erase', { vol: 0.9, rate: 0.8 });
       this.parts.paper(this.player.x, this.player.y - 70, 22, 1.4);
@@ -329,7 +351,7 @@ export class GameScene implements Scene, GameAPI {
     return this.level.sheltered?.(x, y) ?? false;
   }
   startChase(o: { speed?: number; startOffset?: number; max?: number } = {}) {
-    this.chase = { active: true, front: this.player.x + (o.startOffset ?? -900), speed: o.speed ?? 0, t: 0, max: o.max ?? 318 };
+    this.chase = { active: true, front: this.player.x + (o.startOffset ?? -900), speed: o.speed ?? 0, t: 0, max: o.max ?? 318, cine: false };
   }
   stopChase() {
     if (!this.chase.active) return;
@@ -440,6 +462,12 @@ export class GameScene implements Scene, GameAPI {
     this.player.facing = 1;
     this.stopChase();
     this.co.stopAll();
+    this.grabT = -1;
+    this.blankCtl = null;
+    this.timeScale = 1;
+    this.camFocus = null;
+    this.cineFade = 0;
+    this.chase.cine = false;
     this.flights = [];
     this.erased.clear();
     this.rec = null;
@@ -508,6 +536,9 @@ export class GameScene implements Scene, GameAPI {
       return;
     }
 
+    // 느린 화면이어도 카메라는 실제 시간으로 움직인다
+    const realDt = dt;
+    dt *= this.timeScale;
     this.dt = dt;
     this.t += dt;
     this.playTime += dt;
@@ -528,6 +559,7 @@ export class GameScene implements Scene, GameAPI {
     this.updateFlood(dt);
     this.updateFlights(dt);
     this.co.update(dt);
+    this.updateBlank(dt);
 
     // 떨어짐
     if (this.player.y > this.level.killY && this.player.state !== 'dead') this.kill('fall');
@@ -542,7 +574,7 @@ export class GameScene implements Scene, GameAPI {
 
     if (this.mode === 'dying') {
       this.dieT += dt;
-      if (this.dieT > 1.55) {
+      if (this.dieT > (this.grabT >= 0 ? 2.3 : 1.55)) {
         this.restore();
         this.mode = 'play';
         this.fadeA = 1;
@@ -559,7 +591,7 @@ export class GameScene implements Scene, GameAPI {
     // 굳기: 세상이 먹먹해진다
     if (this.mode === 'play' && !this.chase.active) audio.muffle(this.player.freezeAmt * 0.45, 0.2);
 
-    this.updateCamera(dt);
+    this.updateCamera(realDt);
     this.parts.update(dt);
     this.ambientDust(dt);
   }
@@ -735,8 +767,12 @@ export class GameScene implements Scene, GameAPI {
     else if (gap > 780) sp = base * 1.25;
     if (this.mode === 'dying') sp = 160;
     if (c.max <= 0) sp = 0;
-    c.front += sp * dt;
-    if (gap < 26 && p.state !== 'dead') this.kill('erase');
+    // 연출 중에는 연출이 경계를 옮긴다
+    if (!c.cine) {
+      if (this.grabT >= 0) c.front = damp(c.front, this.grabFrom[0] - 20, 4, dt);
+      else c.front += sp * dt;
+    }
+    if (gap < 26 && p.state !== 'dead' && !c.cine) this.kill('grab');
     // 지워지는 주민들
     for (const e of this.ents) {
       if (e instanceof Resident && !this.erased.has(e.id) && e.body.x < c.front + 20 && e.state !== 'gone') {
@@ -768,6 +804,16 @@ export class GameScene implements Scene, GameAPI {
       zoom = Math.min(zoom, 0.86);
     }
     // 앞쪽 여유: 실제로 그쪽으로 달릴 때만 바꾸고, 천천히 넘어간다 (잠깐 뒤돌아본다고 화면이 휙 돌지 않게)
+    if (this.camFocus) {
+      const f = this.camFocus;
+      cam.x = smoothDamp(cam.x, f.x, this.camV, f.smooth ?? 0.4, dt);
+      this.camY = smoothDamp(this.camY, f.y, this.camVY, f.smooth ?? 0.4, dt);
+      cam.y = this.camY;
+      cam.zoom = damp(cam.zoom, f.zoom, 3, dt);
+      this.camLead = cam.x - p.x;
+      cam.update(dt);
+      return;
+    }
     if (Math.abs(p.body.vx) > 120 && Math.sign(p.body.vx) === p.facing) this.leadDir = p.facing;
     this.camLead = smoothDamp(this.camLead, this.leadDir * lead, this.camVL, 1.1, dt, 420);
     const ty = p.y - 330 + yOff;
@@ -972,7 +1018,7 @@ export class GameScene implements Scene, GameAPI {
     }
 
     // 여백
-    if (this.chase.active || (this.mode === 'dying' && this.chase.front > 0 && this.chase.t > 0)) this.drawBlank(v);
+    if (this.chase.active || this.grabT >= 0 || this.blankCtl || (this.mode === 'dying' && this.chase.front > 0 && this.chase.t > 0)) this.drawBlank(v);
 
     cam.apply(ctx, s, 1);
     this.parts.render(ctx);
@@ -1010,7 +1056,7 @@ export class GameScene implements Scene, GameAPI {
 
     // 죽음 연출
     if (this.mode === 'dying') {
-      const k = clamp((this.dieT - 0.55) / 0.8);
+      const k = clamp((this.dieT - (this.grabT >= 0 ? 1.2 : 0.55)) / 0.8);
       app.post.fill(s, this.fadeColor, ease.inQuad(k));
     }
     if (this.fadeA > 0) app.post.fill(s, this.fadeColor, this.fadeA);
@@ -1018,7 +1064,8 @@ export class GameScene implements Scene, GameAPI {
 
     if (this.mode === 'memory') drawMemory(s, this.memArt, this.memT, clamp(this.memT / 0.5));
     if (this.mode === 'ending') this.drawEnding();
-    if (this.mode === 'transition') app.post.fill(s, '#000', clamp(this.transT / 1.4));
+    if (this.cineFade > 0 && this.mode !== 'transition') app.post.fill(s, '#000', this.cineFade);
+    if (this.mode === 'transition') app.post.fill(s, '#000', Math.max(this.cineFade, clamp(this.transT / 1.4)));
   }
 
   // ------------------------------------------------------------------
@@ -1393,17 +1440,11 @@ export class GameScene implements Scene, GameAPI {
     }
   }
 
-  private drawBlank(v: { x0: number; x1: number; y0: number; y1: number }) {
-    const s = app.screen;
-    const ctx = s.ctx;
+  /** 여백의 자세: 평소엔 쫓아오는 자세, 붙잡을 땐 손을 뻗어 낚아채 끌어당기고, 연출 중엔 연출이 정한 대로 */
+  private updateBlank(dt: number) {
     const c = this.chase;
-    const cam = this.cam;
-    cam.apply(ctx, s, 1);
-    drawErasedRegion(ctx, c.front, v.x0 - 100, v.y0 - 100, v.y1 + 100, this.t);
-    // 여백의 몸
-    const L = app.fxLayer;
-    s.clearLayer(L);
-    cam.apply(L.ctx, s, 1);
+    const B = this.blank;
+    if (!c.active && this.grabT < 0 && !this.blankCtl) return;
     const P = rigidPose();
     const rise = clamp(c.t / 1.6);
     P.turn = 0.85;
@@ -1416,11 +1457,114 @@ export class GameScene implements Scene, GameAPI {
     P.legs[1].a = -0.15;
     P.legs[0].b = P.legs[1].b = 0.1;
     P.headTilt = Math.sin(this.t * 0.9) * 0.08;
-    const bx = c.front - 60;
-    const by = lerp(260, -20 + Math.sin(this.t * 1.7) * 14, ease.outCubic(rise));
-    const scale = 430;
-    drawBlankFigure(L.ctx, P, bx, by, scale, this.t);
+    let bx = c.front - 60;
+    let by = lerp(260, -20 + Math.sin(this.t * 1.7) * 14, ease.outCubic(rise));
+    const S = B.scale;
+    let hand: [number, number] | null = null;
+
+    if (this.grabT >= 0) {
+      this.grabT += dt;
+      const t = this.grabT;
+      // 0 ~ 0.18 손이 뻗어 와 가슴을 움켜쥔다 → 0.22 ~ 1.0 들어 올려 제 몸 쪽으로 끌어당긴다
+      const reach = ease.outCubic(clamp(t / 0.18));
+      const lift = ease.inOutCubic(clamp((t - 0.22) / 0.8));
+      const [px, py] = this.grabFrom;
+      P.turn = 1;
+      bx = lerp(this.grabBx0, px - 190, reach);
+      bx = lerp(bx, px - 260, lift);
+      P.crouch = lerp(0, 0.14, reach) * (1 - lift * 0.6);
+      P.lean = lerp(0.3, 0.8, reach) - lift * 0.55;
+      P.headTilt = lerp(0.1, 0.45, reach) - lift * 0.15;
+      plantLegs(P, 0.07);
+      const chest: [number, number] = [px + 6, py - 78];
+      const pull: [number, number] = [bx + 120, by - S * 0.62];
+      const hx0 = lerp(this.grabHand0[0], chest[0], reach),
+        hy0 = lerp(this.grabHand0[1], chest[1], reach);
+      hand = [lerp(hx0, pull[0], lift), lerp(hy0, pull[1], lift) - Math.sin(lift * Math.PI) * 70];
+      // 다른 손도 함께 감싸 온다
+      P.arms[1].a = lerp(1.0, 1.7, reach);
+      P.arms[1].b = lerp(0.25, 1.1, lift);
+    } else if (this.blankCtl) {
+      const k = this.blankCtl;
+      P.turn = 1;
+      bx = k.bx;
+      by = k.by;
+      P.lean = k.lean;
+      P.crouch = k.crouch ?? 0;
+      P.headTilt = k.head;
+      plantLegs(P, 0.08);
+      if (k.hand2) {
+        P.arms[1].a = k.hand2[0];
+        P.arms[1].b = k.hand2[1];
+      }
+      hand = k.hand;
+    }
+    if (hand) B.hand = blankReach(P, 0, bx, by, S, hand[0], hand[1]);
+    else {
+      const j = drawFigure(measureBlank(), P, bx, by, S);
+      B.hand = [...j.hand[0]];
+    }
+    B.P = P;
+    B.bx = bx;
+    B.by = by;
+    // 붙잡힌 몸은 손에 매달려 간다
+    if (this.grabT >= 0.17) {
+      const pb = this.player.body;
+      pb.x = B.hand[0] - 4;
+      pb.y = B.hand[1] + 82 + Math.sin(this.grabT * 15) * 3;
+      if (this.grabT - dt < 0.95 && this.grabT >= 0.95) {
+        this.parts.paper(pb.x, pb.y - 70, 26, 1.5);
+        audio.play('erase', { vol: 0.9, rate: 0.8 });
+        audio.play('paper_rip', { vol: 0.7, rate: 1.2 });
+      }
+    }
+  }
+
+  private drawBlank(v: { x0: number; x1: number; y0: number; y1: number }) {
+    const s = app.screen;
+    const ctx = s.ctx;
+    const c = this.chase;
+    const cam = this.cam;
+    cam.apply(ctx, s, 1);
+    drawErasedRegion(ctx, c.front, v.x0 - 100, v.y0 - 100, v.y1 + 100, this.t);
+    // 여백의 몸 (자세는 updateBlank 에서)
+    const L = app.fxLayer;
+    s.clearLayer(L);
+    cam.apply(L.ctx, s, 1);
+    const B = this.blank;
+    drawBlankFigure(L.ctx, B.P, B.bx, B.by, B.scale, this.t);
     s.composite(L);
+    // 붙잡힌 몸은 흰 종이 위로 보이게 다시 그리고, 그 위를 여백의 손가락이 감싼다
+    if (this.grabT >= 0.12 && this.player.state === 'dead') {
+      const F = app.figLayer;
+      s.clearLayer(F);
+      cam.apply(F.ctx, s, 1);
+      this.player.draw(F.ctx, this, this.petals);
+      s.composite(F);
+      const fade = 1 - clamp((this.player.deathT - 1.05) / 0.35);
+      if (fade > 0) {
+        cam.apply(ctx, s, 1);
+        const r = B.scale * 0.05;
+        const [hx, hy] = B.hand;
+        ctx.save();
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = PAPER;
+        ctx.strokeStyle = 'rgba(20,20,20,0.6)';
+        ctx.lineWidth = 2.2;
+        // 손바닥과 감아쥔 손가락 셋
+        ctx.beginPath();
+        ctx.ellipse(hx - 6, hy, r * 1.05, r * 0.9, 0.3, 0, TAU);
+        ctx.fill();
+        ctx.stroke();
+        for (let k = 0; k < 3; k++) {
+          ctx.beginPath();
+          ctx.ellipse(hx + r * 0.75, hy - r * 0.55 + k * r * 0.55, r * 0.5, r * 0.26, 0.15, 0, TAU);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
   }
 
   private drawHUD() {
@@ -1562,3 +1706,13 @@ export class GameScene implements Scene, GameAPI {
 void PH;
 void drawPetal;
 void lerp;
+
+let mBlank: CanvasRenderingContext2D | null = null;
+function measureBlank() {
+  if (!mBlank) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 2;
+    mBlank = c.getContext('2d')!;
+  }
+  return mBlank;
+}

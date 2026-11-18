@@ -99,7 +99,7 @@ export class Player implements PlayerLike {
   scriptTarget: number | null = null;
   scriptSpeed = 200;
   deathT = 0;
-  deathCause: 'erase' | 'fall' | 'crush' | 'drown' = 'erase';
+  deathCause: 'erase' | 'fall' | 'crush' | 'drown' | 'grab' = 'erase';
   joints: Joints | null = null;
   hideFlower = false;
   /** 물에 잠긴 정도 0..1 */
@@ -140,6 +140,8 @@ export class Player implements PlayerLike {
         b.vy = Math.min(this.deathCause === 'drown' ? 120 : PH.MAX_FALL, b.vy + PH.GRAV * dt);
         b.y += b.vy * dt;
       }
+      // 여백에게 붙잡힘: 위치는 장면이 손에 맞춰 옮기고, 몸은 버둥거린다
+      if (this.deathCause === 'grab') this.struggle(dt);
       return;
     }
     let ax = control ? inp.axisX : 0;
@@ -537,12 +539,42 @@ export class Player implements PlayerLike {
     this.body.vx = 0;
   }
 
-  die(cause: 'erase' | 'fall' | 'crush' | 'drown') {
+  die(cause: 'erase' | 'fall' | 'crush' | 'drown' | 'grab') {
     if (this.state === 'dead') return;
     this.state = 'dead';
     this.deathCause = cause;
     this.deathT = 0;
     this.grabbing = null;
+  }
+
+  /** 붙잡혀 들려 올라가며 버둥거리는 자세 (뒤에서 잡혔으니 몸은 앞을, 팔은 뒤의 손을 향한다) */
+  private struggle(dt: number) {
+    const t = this.deathT;
+    const P = rigidPose();
+    const f = this.facing;
+    const nI = f > 0 ? 0 : 1;
+    const fI = 1 - nI;
+    P.turn = f;
+    const lift = clamp((t - 0.18) / 0.4);
+    // 잡히는 순간 움찔 → 들리며 다리를 허우적, 팔은 등 뒤의 손을 밀어낸다
+    const kick = Math.sin(t * 15) * lerp(0.15, 0.75, lift) * (1 - clamp((t - 0.9) / 0.4));
+    P.lean = lerp(0.25, -0.25, lift) + Math.sin(t * 9) * 0.06 * lift;
+    P.headTilt = lerp(0.2, -0.5, lift);
+    P.crouch = 0.02;
+    P.legs[nI].a = 0.35 + kick;
+    P.legs[nI].b = 0.7 + Math.max(0, kick) * 0.9;
+    P.legs[fI].a = -0.1 - kick * 0.8;
+    P.legs[fI].b = 0.9 + Math.max(0, -kick) * 0.9;
+    const wave = Math.sin(t * 12 + 1) * 0.35 * lift;
+    P.arms[nI].a = lerp(0.6, -1.7, lift) + wave;
+    P.arms[nI].b = lerp(0.3, 0.9, lift);
+    P.arms[fI].a = lerp(0.9, -1.2, lift) - wave;
+    P.arms[fI].b = lerp(0.3, 1.2, lift);
+    lerpPose(this.pose, P, 1 - Math.exp(-20 * dt), this.pose);
+    this.pose.turn = f;
+    this.rollK = damp(this.rollK, 0, 16, dt);
+    this.rollAngle = damp(this.rollAngle, 0, 16, dt);
+    this.visX = damp(this.visX, 0, 12, dt);
   }
 
   /** 발밑 땅까지의 거리 (공중에서 착지 준비 자세용) */
@@ -793,7 +825,13 @@ export class Player implements PlayerLike {
     const st = defaultStyle();
     if (this.state === 'dead') {
       const k = clamp(this.deathT / 0.6);
-      if (this.deathCause === 'erase') {
+      if (this.deathCause === 'grab') {
+        // 들려 올라가 버둥대다가, 하얗게 바래며 종이로 흩어진다
+        const g2 = clamp((this.deathT - 0.85) / 0.4);
+        st.color = lerpColor('#0e0e0e', '#f6f5f1', g2);
+        st.farColor = st.color;
+        st.alpha = 1 - clamp((this.deathT - 1.05) / 0.35);
+      } else if (this.deathCause === 'erase') {
         st.color = lerpColor('#0e0e0e', '#f6f5f1', k);
         st.farColor = st.color;
         st.alpha = 1 - clamp((this.deathT - 0.5) / 0.6);
@@ -827,7 +865,7 @@ export class Player implements PlayerLike {
     this.joints = drawFigure(ctx, this.pose, fx, fy, PH.SCALE, st, {
       heldBehind: hide,
       held:
-        petals.length > 0 && !(this.state === 'dead' && this.deathCause === 'erase')
+        petals.length > 0 && !(this.state === 'dead' && (this.deathCause === 'erase' || (this.deathCause === 'grab' && this.deathT > 0.9)))
           ? (fc, hx, hy, ang) => {
               const sway = Math.sin(g.t * 2.1) * 0.08 - b.vx * 0.0006;
               const a = clamp(-ang * 0.25 * this.facing, -0.6, 0.6) * this.facing * 0;
@@ -846,7 +884,7 @@ export class Player implements PlayerLike {
   /** 꽃 빛 (인물 레이어 아래에 깔린다) */
   drawGlow(ctx: CanvasRenderingContext2D, petals: string[]) {
     if (!this.joints || this.freezeAmt > 0.5 || petals.length === 0) return;
-    if (this.state === 'dead' && (this.deathCause === 'erase' || this.deathCause === 'crush')) return;
+    if (this.state === 'dead' && (this.deathCause === 'erase' || this.deathCause === 'crush' || (this.deathCause === 'grab' && this.deathT > 0.9))) return;
     const [hx, hy] = this.joints.hand[this.joints.near];
     drawGlow(ctx, hx, hy - 26, 120 + petals.length * 10, petals, 0.7);
   }

@@ -1,7 +1,7 @@
 import { app, DEBUG, params, type Scene } from '../app';
 import { audio } from '../core/audio';
 import { CoRunner } from '../core/co';
-import { clamp, damp, ease, lerp, mulberry32, rand, TAU } from '../core/math';
+import { clamp, damp, ease, lerp, mulberry32, rand, smoothDamp, TAU } from '../core/math';
 import { Save, type SaveData } from '../core/save';
 import { Camera } from '../gfx/screen';
 import { Particles } from '../gfx/particles';
@@ -122,6 +122,11 @@ export class GameScene implements Scene, GameAPI {
   private erased = new Set<string>();
   private camLead = 0;
   private camY = -330;
+  /** 카메라 스프링 속도 */
+  private camV: [number] = [0];
+  private camVY: [number] = [0];
+  private camVL: [number] = [0];
+  private leadDir = 1;
   private fps = 60;
 
   private transT = 0;
@@ -453,6 +458,8 @@ export class GameScene implements Scene, GameAPI {
 
   private snapCamera() {
     this.camLead = this.player.facing * 140;
+    this.leadDir = this.player.facing;
+    this.camV[0] = this.camVY[0] = this.camVL[0] = 0;
     this.cam.x = this.player.x + this.camLead;
     this.camY = this.player.y - 330;
     this.cam.y = this.camY;
@@ -760,17 +767,21 @@ export class GameScene implements Scene, GameAPI {
       lead = 330;
       zoom = Math.min(zoom, 0.86);
     }
-    this.camLead = damp(this.camLead, p.facing * lead, 1.6, dt);
+    // 앞쪽 여유: 실제로 그쪽으로 달릴 때만 바꾸고, 천천히 넘어간다 (잠깐 뒤돌아본다고 화면이 휙 돌지 않게)
+    if (Math.abs(p.body.vx) > 120 && Math.sign(p.body.vx) === p.facing) this.leadDir = p.facing;
+    this.camLead = smoothDamp(this.camLead, this.leadDir * lead, this.camVL, 1.1, dt, 420);
     const ty = p.y - 330 + yOff;
     // 세로는 착지했을 때 위주로 따라간다
-    this.camY = damp(this.camY, p.body.onGround || p.y > this.camY + 500 || p.y < this.camY + 120 ? ty : this.camY, p.body.onGround ? 3 : 2, dt);
+    const yT = p.body.onGround || p.y > this.camY + 500 || p.y < this.camY + 120 ? ty : this.camY;
+    this.camY = smoothDamp(this.camY, yT, this.camVY, p.body.onGround ? 0.32 : 0.45, dt);
     let tx = p.x + this.camLead;
     // 여백이 처음 나타날 때는 그쪽을 비춘다
-    if (this.chase.active && this.chase.t < 2.3) {
+    const intro = this.chase.active && this.chase.t < 2.3;
+    if (intro) {
       tx = (p.x + this.chase.front) / 2 - 80;
       this.camLead = tx - p.x;
     }
-    cam.x = damp(cam.x, tx, this.chase.active && this.chase.t < 2.3 ? 2.5 : 6, dt);
+    cam.x = smoothDamp(cam.x, tx, this.camV, intro ? 0.6 : 0.2, dt);
     cam.y = this.camY;
     cam.zoom = damp(cam.zoom, zoom, 1.5, dt);
     // 레벨 경계

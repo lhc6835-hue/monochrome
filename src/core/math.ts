@@ -34,6 +34,29 @@ export type EaseFn = (t: number) => number;
 /** 프레임레이트 독립적인 지수 감쇠 보간 */
 export const damp = (a: number, b: number, lambda: number, dt: number) => lerp(a, b, 1 - Math.exp(-lambda * dt));
 
+/**
+ * 임계 감쇠 스프링으로 따라가기 (속도까지 이어져서 출발·정지가 툭 끊기지 않는다).
+ * v 는 [속도] 한 칸짜리 배열로 넘겨 프레임마다 유지한다. smooth = 대략 도달 시간(초).
+ */
+export function smoothDamp(cur: number, target: number, v: [number], smooth: number, dt: number, maxSpeed = Infinity) {
+  smooth = Math.max(0.0001, smooth);
+  const om = 2 / smooth;
+  const x = om * dt;
+  const e = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  let ch = cur - target;
+  const maxCh = maxSpeed * smooth;
+  ch = Math.max(-maxCh, Math.min(maxCh, ch));
+  const t = cur - ch;
+  const tmp = (v[0] + om * ch) * dt;
+  v[0] = (v[0] - om * tmp) * e;
+  let out = t + (ch + tmp) * e;
+  if (target - cur > 0 === out > target) {
+    out = target;
+    v[0] = (out - target) / dt;
+  }
+  return out;
+}
+
 /** 감쇠 스프링 (overshoot 가능) */
 export class Spring {
   vel = 0;

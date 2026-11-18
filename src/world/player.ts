@@ -2,7 +2,7 @@ import { Body, moveBody, areaFree, type Solid } from './physics';
 import type { GameAPI, PlayerLike } from './types';
 import type { Input } from '../core/input';
 import { Box } from './entities';
-import { ROLL_CONTACTS, ROLL_T, sampleRoll, rollGeometry, RollMotion } from './roll';
+import { ROLL_CONTACTS, ROLL_T, sampleRoll, RollPath } from './roll';
 import { audio } from '../core/audio';
 import { clamp, damp, ease, lerp, noise1 } from '../core/math';
 import { applyIdle, applyRunCycle, clonePose, drawFigure, lerpPose, plantLegs, reachIK, rigidPose, defaultStyle, type Pose, type Joints } from '../gfx/figure';
@@ -70,7 +70,14 @@ export class Player implements PlayerLike {
   private rollLaps = 0;
   private rollSpeed = 0;
   private rollAir = 0;
-  private rollMo = new RollMotion();
+  private rollPath: RollPath | null = null;
+  /** 다시 구른 바퀴 수만큼 쌓인 거리 (+ 벽에 막혀 못 간 만큼 뺀다) */
+  private rollBase = 0;
+  /** 루트 모션이 정한 몸의 위치(구르기 시작점 기준)와, 그려지는 몸이 실제 충돌 몸에서 벗어난 양 */
+  private rollRootX = 0;
+  private rollStartX = 0;
+  /** 그릴 때만 쓰는 가로 어긋남: 충돌 몸은 부드럽게 움직이고, 손발이 땅에 박히는 건 그림이 맡는다 */
+  visX = 0;
   private rollPose: Pose = rigidPose();
   private rollDir = 1;
   rollAngle = 0;
@@ -301,9 +308,12 @@ export class Player implements PlayerLike {
       this.rollT = 0;
       this.rollLaps = 0;
       this.rollAir = 0;
-      this.rollMo.reset();
+      this.rollPath = new RollPath(measureCtx(), Math.min(Math.max(Math.abs(b.vx), 300), PH.RUN), PH.SCALE);
+      this.rollBase = 0;
       this.rollDir = Math.sign(b.vx);
       this.rollSpeed = Math.max(Math.abs(b.vx), 300);
+      this.rollStartX = b.x + this.visX;
+      this.rollRootX = 0;
       b.h = PH.SLIDE_H;
       audio.play('swish2', { vol: 0.5, rate: 0.85 });
       audio.play('land', { vol: 0.25, rate: 1.3 });
@@ -318,6 +328,8 @@ export class Player implements PlayerLike {
       this.rollT += dt / ROLL_T;
       // 발이 엉덩이 밑에 닿았는데 머리 위가 막혀 있으면, 일어서지 않고 그대로 한 바퀴 더 (웅크린 자세로 이어진다)
       if ((u0 < ROLL_REPEAT_AT && this.rollT >= ROLL_REPEAT_AT && !canStand()) || (this.rollT >= 1 && !canStand())) {
+        const path = this.rollPath!;
+        this.rollBase += path.at(Math.min(this.rollT, 1)) - path.at(ROLL_REPEAT_TO);
         this.rollT = ROLL_REPEAT_TO + (this.rollT - Math.min(this.rollT, ROLL_REPEAT_AT));
         this.rollLaps++;
         this.rollU = this.rollT;
@@ -335,10 +347,16 @@ export class Player implements PlayerLike {
         if (b.onGround) audio.play('step2', { vol: 0.35 });
       } else {
         // 루트 모션: 짚은 손·디딘 발은 미끄러지지 않고, 등은 굴러간 만큼만 나아간다
-        const rot = sampleRoll(this.rollPose, Math.min(this.rollT, 1), this.rollDir);
-        const geo = rollGeometry(measureCtx(), this.rollPose, rot, this.rollDir, b.x, b.y, PH.SCALE);
-        const dx = this.rollMo.step(geo, Math.min(this.rollT, 1), rot, this.rollDir, dt, this.rollSpeed);
-        b.vx = clamp(dx / dt, -900, 900);
+        // 미리 구해 둔 부드러운 길을 따라간다. 벽에 막혀 몸이 못 가면 길도 그만큼 멈춘다
+        const prevRoot = this.rollRootX;
+        this.rollRootX = this.rollDir * (this.rollBase + this.rollPath!.at(Math.min(this.rollT, 1)));
+        const bodyOff = b.x - this.rollStartX;
+        const lim = clamp(this.rollRootX, bodyOff - 24, bodyOff + 24);
+        this.rollBase += (lim - this.rollRootX) * this.rollDir;
+        this.rollRootX = lim;
+        const off = this.rollStartX + this.rollRootX - b.x;
+        b.vx = clamp((this.rollRootX - prevRoot) / dt + off * 8, -900, 900);
+        this.visX = off;
       }
     }
 
@@ -581,6 +599,7 @@ export class Player implements PlayerLike {
       key = 'slide';
       // 실제 앞구르기 키프레임 (손 짚기 → 어깨 → 등 → 엉덩이 → 발)
       const u = Math.min(this.rollT, 1);
+      this.visX = this.rollStartX + this.rollRootX - this.body.x;
       const rot = sampleRoll(P, u, this.rollDir);
       this.rollAngle = this.rollDir * (rot + this.rollLaps * Math.PI * 2);
       for (const c of ROLL_CONTACTS) {
@@ -687,6 +706,7 @@ export class Player implements PlayerLike {
       this.rollAngle -= Math.round(this.rollAngle / TW) * TW;
       this.rollAngle = damp(this.rollAngle, 0, 16, dt);
       this.rollK = damp(this.rollK, 0, 16, dt);
+      this.visX = damp(this.visX, 0, 9, dt);
       this.rollU = 0;
     }
     // 상태가 바뀌면 이전 자세에서 이어진다
@@ -785,7 +805,7 @@ export class Player implements PlayerLike {
     const rk = this.rollK,
       ra = this.rollAngle;
     const rolling = rk > 0.01 || Math.abs(ra) > 0.01;
-    const fx = b.x,
+    const fx = b.x + this.visX,
       fy = b.y;
     if (rolling) {
       const m = drawFigure(measureCtx(), this.pose, fx, fy, PH.SCALE, st);

@@ -612,7 +612,7 @@ export class GameScene implements Scene, GameAPI {
     this.updateBlank(dt);
 
     // 떨어짐
-    if (this.player.y > this.level.killY && this.player.state !== 'dead') this.kill('fall');
+    if (this.player.y > this.level.killY && this.player.state !== 'dead') this.kill(this.level.fallCause ?? 'fall');
     // 익사
     const wa = this.waterAt(this.player.x);
     const pb = this.player.body;
@@ -1502,6 +1502,42 @@ export class GameScene implements Scene, GameAPI {
         ctx.fill();
         return;
       }
+      case 'pencil': {
+        // 흰 땅: 종이 위 연필로 그린 땅 (먹이 아니다)
+        ctx.fillStyle = '#f1f0ec';
+        ctx.fillRect(so.x, so.y, so.w, Math.min(so.h, 900));
+        ctx.strokeStyle = 'rgba(40,40,38,0.75)';
+        ctx.lineWidth = 2.5;
+        const fr = Math.floor(this.t * 12);
+        for (let k = 0; k < 2; k++) {
+          ctx.beginPath();
+          for (let x = so.x; x <= so.x + so.w; x += 30) {
+            const yy = so.y + Math.sin(x * 0.07 + k * 3 + fr * 0.6) * 1.3 + k * 3;
+            if (x === so.x) ctx.moveTo(x, yy);
+            else ctx.lineTo(x, yy);
+          }
+          ctx.stroke();
+        }
+        // 해칭
+        ctx.strokeStyle = 'rgba(40,40,38,0.14)';
+        ctx.lineWidth = 1.5;
+        for (let x = so.x + 10; x < so.x + so.w - 10; x += 22) {
+          ctx.beginPath();
+          ctx.moveTo(x, so.y + 10);
+          ctx.lineTo(x + 18, so.y + 34);
+          ctx.stroke();
+        }
+        // 옆면
+        ctx.strokeStyle = 'rgba(40,40,38,0.6)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(so.x, so.y);
+        ctx.lineTo(so.x + 2, so.y + Math.min(so.h, 600));
+        ctx.moveTo(so.x + so.w, so.y);
+        ctx.lineTo(so.x + so.w - 2, so.y + Math.min(so.h, 600));
+        ctx.stroke();
+        return;
+      }
       case 'hull': {
         // 뒤집혀 모래에 박힌 배 밑동
         ctx.fillStyle = INK;
@@ -1678,7 +1714,7 @@ export class GameScene implements Scene, GameAPI {
     const c = this.chase;
     const cam = this.cam;
     cam.apply(ctx, s, 1);
-    drawErasedRegion(ctx, c.front, v.x0 - 100, v.y0 - 100, v.y1 + 100, this.t);
+    drawErasedRegion(ctx, c.front, v.x0 - 100, v.y0 - 100, v.y1 + 100, this.t, this.level.eraseColor);
     // 여백의 몸 (자세는 updateBlank 에서)
     const L = app.fxLayer;
     s.clearLayer(L);
@@ -1831,6 +1867,7 @@ export class GameScene implements Scene, GameAPI {
       archive: '천창 너머로, 바람에 흔들리는 회색 숲이 보였다.',
       forest: '숲이 끝나는 곳에서, 회색 바다가 숨을 쉬고 있었다.',
       sea: '하얀 파도 너머에는, 아무것도 그려지지 않은 땅이 있었다.',
+      blank: '색의 경계 너머에서, 시든 꽃밭이 기다리고 있었다.',
     };
     line(closing[this.level.id] ?? '', s.H * 0.38, 2.0, 26);
     line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${this.memories.size} / ${mems}`, s.H * 0.5, 4.0, 19, '#8d8d8a');

@@ -270,6 +270,8 @@ export class Resident extends Entity {
   poseOverride: (() => Pose) | null = null;
   /** 아직 꽃잎을 건넬 수 없다 */
   locked = false;
+  /** 반쯤 지워짐 (1 = 절반이 비어 있음) → 깨어나며 0 으로 다시 그려진다 */
+  half = 0;
 
   constructor(def: Extract<EntityDef, { type: 'resident' }>) {
     super(def.id);
@@ -282,6 +284,7 @@ export class Resident extends Entity {
     this.after = def.after ?? 'leave';
     this.leaveTo = def.leaveTo ?? def.x - 1600;
     this.interactRange = 110;
+    this.half = def.half ? 1 : 0;
   }
 
   get awake() {
@@ -453,6 +456,28 @@ export class Resident extends Entity {
   }
 
   drawFront(ctx: CanvasRenderingContext2D, g: GameAPI) {
+    // 반쯤 지워진 몸: 몸의 한쪽을 찢긴 종이가 덮고 있다. 깨어나면 선이 다시 그어지듯 걷힌다
+    if (this.half > 0.01 && this.state !== 'gone') {
+      if (this.state !== 'frozen') this.half = Math.max(0, this.half - g.dt / 1.2);
+      const b = this.body;
+      const top = b.y - this.scale * 1.05;
+      const cut = b.x - this.scale * 0.32 + this.scale * 0.64 * (1 - this.half * 0.55);
+      ctx.save();
+      ctx.fillStyle = '#f3f2ee';
+      ctx.beginPath();
+      ctx.moveTo(b.x + this.scale * 0.4, top);
+      for (let i = 0; i <= 12; i++) {
+        const yy = top + (this.scale * 1.08 * i) / 12;
+        ctx.lineTo(cut + Math.sin(i * 2.3 + b.x) * 8 + ((i * 37) % 11) - 5, yy);
+      }
+      ctx.lineTo(b.x + this.scale * 0.4, b.y + 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(30,30,28,0.55)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
     // 깨어난 주민: 가슴에 받은 꽃잎이 빛난다
     if (this.iris && this.state !== 'gone' && this.alpha > 0.05) {
       const k = this.state === 'waking' ? clamp(this.wakeT / 0.6) : 1;
@@ -480,10 +505,11 @@ export class Resident extends Entity {
   }
 
   save() {
-    return { s: this.state === 'waking' ? (this.after === 'follow' ? 'follow' : this.after === 'stay' ? 'stay' : 'gone') : this.state === 'leave' ? 'gone' : this.state, x: this.body.x, y: this.body.y, iris: this.iris };
+    return { s: this.state === 'waking' ? (this.after === 'follow' ? 'follow' : this.after === 'stay' ? 'stay' : 'gone') : this.state === 'leave' ? 'gone' : this.state, x: this.body.x, y: this.body.y, iris: this.iris, half: this.half };
   }
-  load(s: { s: RState; x: number; y: number; iris: string | null }) {
+  load(s: { s: RState; x: number; y: number; iris: string | null; half?: number }) {
     this.state = s.s;
+    this.half = s.s === 'frozen' ? (s.half ?? this.half) : 0;
     this.body.x = s.x;
     this.body.y = s.y;
     this.body.vx = this.body.vy = 0;

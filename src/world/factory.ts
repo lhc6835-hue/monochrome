@@ -6,6 +6,7 @@ import { Hazard, TrainCar } from './entities4';
 import { Recorder } from './entities5';
 import { Flock, Seeker } from './entities6';
 import { Beacon, Buoy, LitPlank, Tide } from './entities7';
+import { Eraser, Gaze, Hands } from './entities8';
 
 export function createEntity(def: EntityDef): Entity {
   switch (def.type) {
@@ -65,5 +66,11 @@ export function createEntity(def: EntityDef): Entity {
       return new Beacon(def);
     case 'litplank':
       return new LitPlank(def);
+    case 'eraser':
+      return new Eraser(def);
+    case 'hands':
+      return new Hands(def);
+    case 'gaze':
+      return new Gaze(def);
   }
 }

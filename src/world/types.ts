@@ -46,6 +46,8 @@ export type EntityDef =
       /** 깨어난 뒤 행동: leave(기본: 왼쪽으로 떠남) | follow */
       after?: 'leave' | 'follow' | 'stay';
       leaveTo?: number;
+      /** 반쯤 지워진 채 굳어 있다 (여백의 땅). 꽃잎을 받으면 다시 그려진다 */
+      half?: boolean;
     }
   | { type: 'petal'; id: string; x: number; y: number; color: string }
   | { type: 'memory'; id: string; x: number; y?: number; art: string }
@@ -88,7 +90,13 @@ export type EntityDef =
   /** 등대 불빛: (x, y) 에서 mid ± amp 로 훑는다. signal 이 켜지면 (한 번 켜지면 계속) */
   | { type: 'beacon'; id: string; x: number; y: number; mid: number; amp: number; period: number; len?: number; half?: number; signal?: string; sweep?: [number, number] }
   /** 빛이 닿을 때만 단단한 발판. by = 등대 id 또는 'flower'(꽃빛). h 가 없으면 위로만 막는 판자 */
-  | { type: 'litplank'; id: string; x: number; y: number; w: number; h?: number; by: string; hold?: number };
+  | { type: 'litplank'; id: string; x: number; y: number; w: number; h?: number; by: string; hold?: number }
+  /** 지우개: y ~ y+h 띠를 x0 ~ x1 로 dir 방향으로 가로지른다 (period 마다) */
+  | { type: 'eraser'; id: string; x0: number; x1: number; y: number; h: number; period: number; phase?: number; dir: 1 | -1 }
+  /** 거대한 손 (연출이 slam 을 부른다) */
+  | { type: 'hands'; id: string }
+  /** 여백의 시선: (x, y) 에서 mid ± amp 로 훑는다. 연출이 active 를 켠다 */
+  | { type: 'gaze'; id: string; x: number; y: number; mid: number; amp: number; period: number; half: number };
 
 export interface TriggerDef {
   id: string;
@@ -140,6 +148,10 @@ export interface LevelDef {
   sheltered?: (x: number, y: number) => boolean;
   /** 체크포인트에서 다시 시작할 때 */
   onRestore?: (g: GameAPI) => void;
+  /** 떨어졌을 때의 죽음 (기본 fall). 여백의 땅에서는 하얗게 지워진다 */
+  fallCause?: 'fall' | 'erase';
+  /** 여백이 지운 자리의 색 (기본 흰 종이). 흰 땅에서는 회색 빈칸 */
+  eraseColor?: string;
   customPrompt?: (g: GameAPI) => { text: string; x: number; y: number; act: () => void } | null;
 }
 

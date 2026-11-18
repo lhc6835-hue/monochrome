@@ -323,3 +323,23 @@ export function seaTheme(width: number, seed = 77): BgTheme {
   };
   return { skyTop: '#c9c9c6', skyMid: '#d6d6d2', skyBot: '#b9b9b5', layers: [far, mid] };
 }
+
+/** 여백의 땅: 흰 종이. 저 멀리 지워지다 만 세상의 연필 자국 */
+export function blankTheme(width: number, seed = 88): BgTheme {
+  const rng = mulberry32(seed);
+  const pick = <T>(a: T[]) => a[Math.floor(rng() * a.length)];
+  const icons: IconName[] = ['house', 'tree2', 'pine', 'lamp', 'lighthouse', 'factory', 'train', 'bookshelf', 'bench', 'signpost', 'crane', 'tower'];
+  const far: BgLayer = {
+    p: 0.12,
+    color: '#ecebe7',
+    ground: 0,
+    items: scatter(rng, -1200, width * 0.12 + 2600, 260, 640, (x) => ({ icon: pick(icons), x, h: 140 + rng() * 200, sx: 0.8 + rng() * 0.5 })),
+  };
+  const mid: BgLayer = {
+    p: 0.34,
+    color: '#e5e4df',
+    ground: 40,
+    items: scatter(rng, -1200, width * 0.34 + 2400, 700, 1600, (x) => ({ icon: pick(icons), x, h: 220 + rng() * 240, flip: rng() < 0.5 })),
+  };
+  return { skyTop: '#f4f3ef', skyMid: '#f2f1ed', skyBot: '#ecebe6', layers: [far, mid] };
+}

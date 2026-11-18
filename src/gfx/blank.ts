@@ -62,7 +62,7 @@ export function drawHollowEye(ctx: CanvasRenderingContext2D, cx: number, cy: num
  * 지워진 영역: frontX 왼쪽을 하얀 종이로 덮는다. 경계는 찢긴 종이 + 연필 자국.
  * 월드 좌표계에서 호출. (y0..y1 = 덮을 세로 범위)
  */
-export function drawErasedRegion(ctx: CanvasRenderingContext2D, frontX: number, x0: number, y0: number, y1: number, t: number) {
+export function drawErasedRegion(ctx: CanvasRenderingContext2D, frontX: number, x0: number, y0: number, y1: number, t: number, color = PAPER) {
   if (frontX <= x0) return;
   const steps = 48;
   const frame = Math.floor(t * 12);
@@ -76,7 +76,7 @@ export function drawErasedRegion(ctx: CanvasRenderingContext2D, frontX: number, 
   }
   ctx.lineTo(x0 - 50, y1);
   ctx.closePath();
-  ctx.fillStyle = PAPER;
+  ctx.fillStyle = color;
   ctx.fill();
   // 경계 연필선
   ctx.strokeStyle = 'rgba(25,25,25,0.55)';

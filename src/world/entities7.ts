@@ -252,6 +252,15 @@ export class LitPlank extends Entity {
   solidity = 0;
   private litT = 0;
   private wasSolid = false;
+  /** 지우개에 지워진 뒤 다시 그릴 수 없는 시간 */
+  private erasedT = 0;
+  erase() {
+    if (this.solidity <= 0 && this.erasedT > 0) return;
+    this.solidity = 0;
+    this.litT = 0;
+    this.erasedT = 0.7;
+    this.solid = null;
+  }
   constructor(public def: Extract<EntityDef, { type: 'litplank' }>) {
     super(def.id);
   }
@@ -273,7 +282,8 @@ export class LitPlank extends Entity {
       const b = g.entity<Beacon>(d.by);
       if (b) for (let k = 0; k <= 4 && !lit; k++) lit = b.illuminates(d.x + (d.w * k) / 4, d.y);
     }
-    if (lit) this.litT = d.hold ?? 0.6;
+    this.erasedT -= dt;
+    if (lit && this.erasedT <= 0) this.litT = d.hold ?? 0.6;
     else this.litT -= dt;
     const target = this.litT > 0 ? 1 : 0;
     // 단단해지는 데 0.3초, 흐려지는 데 0.25초

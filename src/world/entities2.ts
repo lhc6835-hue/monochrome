@@ -171,7 +171,8 @@ export class Ladder extends Entity {
     ctx.fillStyle = INK;
     ctx.fillRect(x - 30, top - 30, 8, bottom - top + 30);
     ctx.fillRect(x + 22, top - 30, 8, bottom - top + 30);
-    for (let y = bottom - 20; y > top - 20; y -= 34) ctx.fillRect(x - 26, y, 52, 7);
+    // 가로대: 바닥에서 34px 마다 (플레이어가 한 칸씩 딛는 간격과 같다)
+    for (let y = bottom - 34; y > top - 30; y -= 34) ctx.fillRect(x - 26, y - 3, 52, 7);
   }
   lights(): Light[] {
     return [];

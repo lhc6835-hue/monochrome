@@ -4,7 +4,7 @@ import type { Input } from '../core/input';
 import { Box } from './entities';
 import { audio } from '../core/audio';
 import { clamp, damp, ease, lerp, noise1 } from '../core/math';
-import { applyIdle, applyRunCycle, drawFigure, lerpPose, plantLegs, rigidPose, defaultStyle, type Pose, type Joints } from '../gfx/figure';
+import { applyIdle, applyRunCycle, clonePose, drawFigure, lerpPose, plantLegs, reachIK, rigidPose, defaultStyle, type Pose, type Joints } from '../gfx/figure';
 import { drawFlower, drawGlow, PETAL_COLORS } from '../gfx/flower';
 
 export const PH = {
@@ -23,6 +23,10 @@ export const PH = {
   SLIDE_H: 60,
   SCALE: 150,
 };
+
+/** 사다리 가로대 간격, 한 칸 오르는 시간 */
+export const RUNG = 34;
+const CLIMB_STEP = 0.19;
 
 export type PState = 'normal' | 'mantle' | 'freeze' | 'slide' | 'give' | 'dead' | 'scripted' | 'climb';
 
@@ -47,7 +51,19 @@ export class Player implements PlayerLike {
   private mantleT = 0;
   private mantleFrom: [number, number] = [0, 0];
   private mantleTo: [number, number] = [0, 0];
-  private landSquash = 0;
+  /** 착지 흡수 동작 */
+  private landT = 9;
+  private landImpact = 0;
+  /** 상태가 바뀔 때 이전 자세에서 이어지게 */
+  private poseKey = 'ground';
+  private blendFrom: Pose | null = null;
+  private blendT = 1;
+  private blendDur = 0.1;
+  /** 사다리: 가로대 단위 이동 */
+  private climbM = 0;
+  private climbE = 0;
+  private climbDir = 0;
+  private climbExit = 0;
   private fallStartY = 0;
   private idleT = 0;
   private stepI = 0;
@@ -117,31 +133,65 @@ export class Player implements PlayerLike {
     }
     this.hopT = Math.max(0, this.hopT - dt);
 
-    // ---------- 사다리 ----------
+    // ---------- 사다리: 가로대를 하나씩 잡고 오른다 ----------
     if (this.state === 'climb' && this.ladder) {
       const L = this.ladder;
-      const upHeld = inp.down('up') || (inp.touchMode && inp.down('jump'));
-      const dir = (control && inp.down('down') ? 1 : 0) - (control && upHeld ? 1 : 0);
+      const upHeld = control && (inp.down('up') || (inp.touchMode && inp.down('jump')));
+      const downHeld = control && inp.down('down');
+      const M = Math.floor((L.bottom - L.top) / RUNG);
       b.vx = 0;
       b.vy = 0;
-      b.x = damp(b.x, L.x, 18, dt);
-      const ny = b.y + dir * 235 * dt;
-      const ph0 = this.climbPhase;
-      this.climbPhase += Math.abs(dir) * dt * 7.5;
-      if (Math.floor(ph0 / Math.PI) !== Math.floor(this.climbPhase / Math.PI)) {
-        audio.step(this.stepI++, 0.3, true);
-        g.noise(b.x, b.y, 300);
+      b.x = damp(b.x, L.x, 14, dt);
+      if (this.climbExit !== 0) {
+        // 꼭대기로 올라서기
+        this.climbExit += dt / 0.34;
+        const k = ease.inOutSine(clamp(this.climbExit));
+        b.y = lerp(L.bottom - M * RUNG, L.top, k);
+        if (this.climbExit >= 1) {
+          b.y = L.top;
+          this.state = 'normal';
+          this.ladder = null;
+          this.climbExit = 0;
+          b.onGround = true;
+          audio.step(this.stepI++, 0.35, true);
+        }
+        this.animate(g, dt);
+        return;
       }
-      if (ny <= L.top) {
-        b.y = L.top;
-        this.state = 'normal';
-        b.onGround = true;
-        this.ladder = null;
-      } else if (ny >= L.bottom) {
-        b.y = L.bottom;
-        this.state = 'normal';
-        this.ladder = null;
-      } else b.y = ny;
+      let left = dt;
+      while (left > 0) {
+        if (this.climbDir === 0) {
+          if (upHeld) {
+            if (this.climbM < M) this.climbDir = 1;
+            else {
+              this.climbExit = 0.0001;
+              break;
+            }
+          } else if (downHeld) {
+            if (this.climbM > 0) this.climbDir = -1;
+            else {
+              b.y = L.bottom;
+              this.state = 'normal';
+              this.ladder = null;
+              break;
+            }
+          } else break;
+        }
+        const need = (1 - this.climbE) * CLIMB_STEP;
+        if (left >= need) {
+          left -= need;
+          this.climbM += this.climbDir;
+          this.climbE = 0;
+          this.climbDir = 0;
+          audio.step(this.stepI++, 0.28, true);
+          audio.play('click4', { vol: 0.12, rate: 1.5, vary: 0.1 });
+          g.noise(b.x, b.y, 260);
+        } else {
+          this.climbE += left / CLIMB_STEP;
+          left = 0;
+        }
+      }
+      if (this.state === 'climb') b.y = L.bottom - (this.climbM + this.climbDir * ease.inOutSine(this.climbE)) * RUNG;
       if (control && ((inp.pressed('jump') && !inp.down('up') && !inp.touchMode) || (inp.touchMode && inp.axisX !== 0))) {
         this.state = 'normal';
         this.ladder = null;
@@ -161,7 +211,12 @@ export class Player implements PlayerLike {
           this.ladder = L;
           this.buffer = 0;
           this.jumping = false;
-          if (atTop && inp.down('down')) b.y = L.top + 14;
+          const M = Math.floor((L.bottom - L.top) / RUNG);
+          this.climbM = atTop && inp.down('down') ? M : clamp(Math.round((L.bottom - b.y) / RUNG), 0, M);
+          this.climbE = 0;
+          this.climbDir = 0;
+          this.climbExit = 0;
+          b.y = L.bottom - this.climbM * RUNG;
           audio.play('clunk', { vol: 0.3, rate: 1.4 });
           this.animate(g, dt);
           return;
@@ -398,7 +453,8 @@ export class Player implements PlayerLike {
       const fall = b.y - this.fallStartY;
       const v = vyBefore;
       if (v > 400) {
-        this.landSquash = clamp(v / 1400) * 0.22;
+        this.landT = 0;
+        this.landImpact = clamp((v - 200) / 1100);
         g.parts.puff(b.x, b.y, Math.round(4 + v / 150), clamp(v / 1000, 0.5, 1.5));
         audio.play(v > 1100 ? 'land_hard' : 'land', { vol: clamp(v / 1200, 0.25, 0.9), vary: 0.08 });
         g.noise(b.x, b.y, 200 + v * 0.35);
@@ -429,6 +485,18 @@ export class Player implements PlayerLike {
     this.grabbing = null;
   }
 
+  /** 발밑 땅까지의 거리 (공중에서 착지 준비 자세용) */
+  private groundGap(g: GameAPI) {
+    const b = this.body;
+    let best = 9999;
+    for (const so of g.solids()) {
+      if (b.x + b.w / 2 <= so.x || b.x - b.w / 2 >= so.x + so.w) continue;
+      const d = so.y - b.y;
+      if (d >= -2 && d < best) best = d;
+    }
+    return best;
+  }
+
   private animate(g: GameAPI, dt: number) {
     const b = this.body;
     const P = rigidPose();
@@ -445,22 +513,15 @@ export class Player implements PlayerLike {
       else audio.step(this.stepI++, clamp(sp / PH.RUN, 0.15, 0.5), metal);
       g.noise(b.x, b.y, this.submerge > 0.03 ? 440 : metal ? 520 : 330);
     }
-    this.landSquash = damp(this.landSquash, 0, 9, dt);
+    this.landT += dt;
     this.idleT = sp < 5 && b.onGround ? this.idleT + dt : 0;
+    let key = 'ground';
 
-    if (this.state === 'climb') {
-      const c = this.climbPhase;
-      P.turn = damp(prev.turn, 0, 12, dt);
-      P.arms[0].a = 2.5 + Math.sin(c) * 0.3;
-      P.arms[1].a = 2.5 - Math.sin(c) * 0.3;
-      P.arms[0].b = P.arms[1].b = 0.5;
-      P.legs[0].a = 0.25 + Math.max(0, Math.sin(c)) * 0.5;
-      P.legs[1].a = 0.25 + Math.max(0, -Math.sin(c)) * 0.5;
-      P.legs[0].b = 0.3 + Math.max(0, Math.sin(c)) * 0.9;
-      P.legs[1].b = 0.3 + Math.max(0, -Math.sin(c)) * 0.9;
-      this.pose = P;
-      return;
+    if (this.state === 'climb' && this.ladder) {
+      key = 'climb';
+      this.climbPose(P, dt);
     } else if (this.state === 'mantle') {
+      key = 'mantle';
       const k = clamp(this.mantleT);
       P.turn = this.facing;
       const near = this.facing > 0 ? 0 : 1;
@@ -475,6 +536,7 @@ export class Player implements PlayerLike {
       P.legs[far].b = 0.6;
       P.crouch = 0.04 * Math.sin(k * Math.PI);
     } else if (this.state === 'slide') {
+      key = 'slide';
       P.turn = this.facing;
       const near = this.facing > 0 ? 0 : 1;
       const far = 1 - near;
@@ -491,6 +553,7 @@ export class Player implements PlayerLike {
       P.headTilt = 0.3;
       P.squash = 0.86;
     } else if (!b.onGround) {
+      key = 'air';
       P.turn = this.facing;
       const near = this.facing > 0 ? 0 : 1;
       const far = 1 - near;
@@ -505,6 +568,17 @@ export class Player implements PlayerLike {
       P.arms[near].b = P.arms[far].b = 0.5;
       P.lean = 0.12;
       P.lookY = lerp(-0.2, 0.5, down);
+      // 땅이 가까워지면 다리를 뻗어 받을 준비를 한다
+      if (b.vy > 0) {
+        const prep = ease.inOutSine(clamp(1 - this.groundGap(g) / 170));
+        P.legs[near].a = lerp(P.legs[near].a, 0.32, prep);
+        P.legs[near].b = lerp(P.legs[near].b, 0.32, prep);
+        P.legs[far].a = lerp(P.legs[far].a, -0.12, prep);
+        P.legs[far].b = lerp(P.legs[far].b, 0.22, prep);
+        P.arms[near].a = lerp(P.arms[near].a, 0.75, prep);
+        P.arms[far].a = lerp(P.arms[far].a, 0.55, prep);
+        P.lean = lerp(P.lean, 0.06, prep);
+      }
     } else if (sp > 8) {
       const sn = clamp(sp / PH.RUN);
       applyRunCycle(P, this.phase, sn, this.facing);
@@ -527,6 +601,25 @@ export class Player implements PlayerLike {
       // 오래 서 있으면 두리번
       if (this.idleT > 4) P.lookX = noise1(this.idleT * 0.5) * 0.9;
     }
+    // 착지: 무릎이 굽었다가 천천히 펴진다 (발은 땅에 붙어 있다)
+    if (key === 'ground' && this.landImpact > 0 && this.landT < 1) {
+      const t = this.landT;
+      const absorb = this.landImpact * (1 - Math.exp(-30 * t)) * Math.exp(-7 * t) * 2.3;
+      if (absorb > 0.002) {
+        P.crouch += 0.105 * absorb;
+        if (sp > 8) {
+          P.legs[0].b += 0.45 * absorb;
+          P.legs[1].b += 0.45 * absorb;
+        } else plantLegs(P, 0.015 + 0.035 * absorb);
+        const near = this.facing > 0 ? 0 : 1;
+        P.arms[near].a += 0.22 * absorb;
+        P.arms[1 - near].a += 0.12 * absorb;
+        P.arms[0].b += 0.35 * absorb;
+        P.arms[1].b += 0.35 * absorb;
+        P.lean += 0.14 * absorb;
+        P.headTilt += 0.08 * absorb;
+      }
+    }
     // 건네기: 팔을 내민다
     if (this.state === 'give') {
       const k = ease.outCubic(clamp(this.giveT / 0.35)) * (1 - ease.inOutQuad(clamp((this.giveT - 0.9) / 0.35)));
@@ -547,12 +640,81 @@ export class Player implements PlayerLike {
       P.eye = 1 - k;
       if (this.freezeAmt < 1 && this.freezeAmt > 0.2) P.headX += Math.sin(g.t * 80) * 0.004;
     }
-    P.squash *= 1 - this.landSquash;
-    if (this.landSquash > 0.01 && b.onGround) {
-      P.crouch += this.landSquash * 0.35;
-      plantLegs(P, 0.03);
+    // 상태가 바뀌면 이전 자세에서 이어진다
+    if (key !== this.poseKey) {
+      const durs: Record<string, number> = { ground: this.poseKey === 'climb' ? 0.22 : 0.09, air: 0.08, climb: 0.2, mantle: 0.07, slide: 0.07 };
+      this.blendFrom = clonePose(prev);
+      this.blendT = 0;
+      this.blendDur = durs[key] ?? 0.1;
+      this.poseKey = key;
+    }
+    if (this.blendFrom && this.blendT < this.blendDur) {
+      this.blendT += dt;
+      const k = ease.outCubic(clamp(this.blendT / this.blendDur));
+      const turn = P.turn;
+      lerpPose(this.blendFrom, P, k, P);
+      if (key !== 'climb' && this.poseKey !== 'climb') P.turn = turn;
     }
     this.pose = P;
+  }
+
+  /** 사다리 위 자세: 손은 가로대를 잡고, 발은 가로대를 딛는다 */
+  private climbPose(P: Pose, dt: number) {
+    const L = this.ladder!;
+    const b = this.body;
+    const S = PH.SCALE;
+    P.turn = damp(this.pose.turn, 0, 14, dt);
+    P.crouch = 0.03;
+    const m = this.climbM;
+    const dir = this.climbDir;
+    const e = dir !== 0 ? this.climbE : this.climbExit > 0 ? 0 : 0;
+    const le = ease.inOutSine(clamp(e * 1.3));
+    const hh = (((m % 2) + 2) % 2 === 0 ? 0 : 1) as 0 | 1; // 높은 손 쪽
+    const lo = (1 - hh) as 0 | 1;
+    const rungY = (k: number) => L.bottom - k * RUNG;
+    // 손 (가로대 중심), 발 (가로대 윗면)
+    const handPos: [number, number][] = [
+      [0, 0],
+      [0, 0],
+    ];
+    const footPos: [number, number][] = [
+      [0, 0],
+      [0, 0],
+    ];
+    const sideX = (i: number, w: number) => L.x + (i === 0 ? -w : w);
+    // 기본 위치
+    handPos[hh] = [sideX(hh, 15), rungY(m + 5)];
+    handPos[lo] = [sideX(lo, 15), rungY(m + 4)];
+    footPos[lo] = [sideX(lo, 11), rungY(m)];
+    footPos[hh] = [sideX(hh, 11), rungY(m + 1)];
+    const arc = Math.sin(Math.PI * le);
+    if (dir > 0) {
+      // 낮은 손 → 두 칸 위, 낮은 발 → 두 칸 위
+      handPos[lo] = [sideX(lo, 15 + 9 * arc), lerp(rungY(m + 4), rungY(m + 6), le) - 6 * arc];
+      footPos[hh] = [sideX(hh, 11 + 7 * arc), lerp(rungY(m), rungY(m + 2), le) - 10 * arc];
+    } else if (dir < 0) {
+      // 높은 손 → 두 칸 아래, 높은 발 → 두 칸 아래
+      handPos[hh] = [sideX(hh, 15 + 9 * arc), lerp(rungY(m + 5), rungY(m + 3), le) - 6 * arc];
+      footPos[lo] = [sideX(lo, 11 + 7 * arc), lerp(rungY(m + 1), rungY(Math.max(0, m - 1)), le) - 10 * arc];
+    }
+    // 꼭대기: 손은 바닥 모서리를 짚고 몸을 밀어 올린다, 발은 따라 올라온다
+    const exitK = this.climbExit > 0 ? ease.inOutSine(clamp(this.climbExit)) : 0;
+    for (const i of [0, 1] as const) {
+      let [hx, hy] = handPos[i];
+      if (hy < L.top - 4) {
+        hy = L.top - 2;
+        hx = sideX(i, 24);
+      }
+      reachIK(P, 'arm', i, (hx - b.x) / S, (hy - 4 - b.y) / S);
+      let [fx, fy] = footPos[i];
+      if (exitK > 0) {
+        fy = lerp(fy, b.y, ease.inQuad(exitK));
+        fx = lerp(fx, sideX(i, 9), exitK);
+      }
+      reachIK(P, 'leg', i, (fx - b.x) / S, (Math.min(L.bottom, fy) - 7.9 - b.y) / S);
+    }
+    if (exitK > 0) P.lean = 0;
+    P.headY = -0.006 + Math.sin(Math.PI * le) * 0.004;
   }
 
   draw(ctx: CanvasRenderingContext2D, g: GameAPI, petals: string[]) {

@@ -477,3 +477,54 @@ export function plantLegs(p: Pose, spread = 0, which: number[] = [0, 1]) {
     p.legs[i].b = bend;
   }
 }
+
+const wrapPi = (a: number) => {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a <= -Math.PI) a += Math.PI * 2;
+  return a;
+};
+
+/**
+ * 정면 자세(turn = 0, lean = 0)에서 팔/다리 끝을 목표점에 닿게 한다 (2관절 IK).
+ * (tx, ty) 는 발 중심 기준 H 단위 로컬 좌표. 팔꿈치/무릎은 바깥쪽으로 굽는다.
+ */
+export function reachIK(p: Pose, limb: 'arm' | 'leg', i: 0 | 1, tx: number, ty: number) {
+  const s = i === 0 ? -1 : 1;
+  const hipY = -(HIP - p.crouch);
+  const arm = limb === 'arm';
+  const ox = (arm ? s * 0.1655 : s * 0.059) + p.bodyX;
+  const oy = arm ? hipY + SHOULDER_Y : hipY;
+  const L1 = arm ? UPPER_ARM : THIGH;
+  const L2 = arm ? LOWER_ARM : SHIN;
+  let vx = tx - ox,
+    vy = ty - oy;
+  let d = Math.hypot(vx, vy);
+  const maxD = L1 + L2 - 1e-4;
+  if (d > maxD) {
+    vx *= maxD / d;
+    vy *= maxD / d;
+    d = maxD;
+  }
+  d = Math.max(d, 1e-4);
+  const base = Math.atan2(vy, vx);
+  const A = Math.acos(Math.max(-1, Math.min(1, (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d))));
+  const c1 = base + A,
+    c2 = base - A;
+  const up1 = s * Math.cos(c1) >= s * Math.cos(c2) ? c1 : c2;
+  const ex = ox + Math.cos(up1) * L1,
+    ey = oy + Math.sin(up1) * L1;
+  const lo = Math.atan2(oy + vy - ey, ox + vx - ex);
+  // 세계 각도 → 리그 각도 (dir(φ) = (-sin φ, cos φ) 이므로 φ = 각도 - π/2)
+  const phi1 = up1 - Math.PI / 2;
+  const phi2 = lo - Math.PI / 2;
+  let a = wrapPi(-phi1 * s);
+  if (a < -Math.PI / 2) a += Math.PI * 2;
+  const bend = wrapPi(phi2 - phi1);
+  if (arm) {
+    p.arms[i].a = a;
+    p.arms[i].b = -bend * s;
+  } else {
+    p.legs[i].a = a;
+    p.legs[i].b = bend * s;
+  }
+}

@@ -134,6 +134,12 @@ const YOKE_BOT = -0.262;
 const SIDE_W = 0.058;
 const SIDE_SHOULDER_Y = YOKE_TOP + SIDE_W + 0.004;
 const BODY_BOT = 0.03;
+/** 정면에서 팔을 든 어깨 높이: 몸통 윗모서리의 반원 중심 */
+const RAISED_SHOULDER_Y = YOKE_TOP + ARM_W / 2;
+const smooth01 = (u: number) => {
+  const k = clamp(u);
+  return k * k * (3 - 2 * k);
+};
 
 const dir = (phi: number): [number, number] => [-Math.sin(phi), Math.cos(phi)];
 
@@ -197,12 +203,15 @@ export function drawFigure(
   const hp: [number, number][] = [];
   const kn: [number, number][] = [];
   const ft: [number, number][] = [];
+  const raise = [0, 0];
   for (let i = 0; i < 2; i++) {
     const s = sides[i];
     const mix = lerp(s, f, tt);
     // 옆모습에서는 어깨가 몸통 윗부분 반원의 한가운데 (팔의 둥근 끝이 곧 어깨가 되도록)
     const shx = s * lerp(0.1655, 0, tt);
-    sh[i] = rot(shx, lerp(SHOULDER_Y, SIDE_SHOULDER_Y, tt));
+    // 정면에서 팔을 들면 어깨가 몸통 윗모서리로 올라가 팔의 둥근 끝이 곧 어깨가 된다
+    raise[i] = smooth01((Math.abs(pose.arms[i].a) - 0.1) / 0.7) * clamp(1 - tt / 0.35);
+    sh[i] = rot(shx, lerp(lerp(SHOULDER_Y, RAISED_SHOULDER_Y, raise[i]), SIDE_SHOULDER_Y, tt));
     const p1 = th - pose.arms[i].a * mix;
     const d1 = dir(p1);
     el[i] = [sh[i][0] + d1[0] * UPPER_ARM, sh[i][1] + d1[1] * UPPER_ARM];
@@ -210,7 +219,8 @@ export function drawFigure(
     const d2 = dir(p2);
     hd[i] = [el[i][0] + d2[0] * LOWER_ARM, el[i][1] + d2[1] * LOWER_ARM];
     hAng[i] = p2;
-    hp[i] = rot(s * lerp(0.059, 0.014, tt), 0);
+    // 옆모습에선 두 다리가 몸통 폭 안에서 한 점에 붙는다 (골반이 앞뒤로 튀어나오지 않게)
+    hp[i] = rot(s * lerp(0.059, 0, tt), 0);
     const q1 = -pose.legs[i].a * mix;
     const e1 = dir(q1);
     kn[i] = [hp[i][0] + e1[0] * THIGH, hp[i][1] + e1[1] * THIGH];
@@ -281,8 +291,32 @@ export function drawFigure(
     ctx.translate(hipX, hipY);
     ctx.rotate(th);
     ctx.beginPath();
-    roundRectPath(ctx, -yw, YOKE_TOP, yw, YOKE_BOT, lerp(0.088, SIDE_W, tt));
-    roundRectPath(ctx, -bw, YOKE_TOP + 0.04, bw, BODY_BOT, 0.02, 0);
+    if (raise[0] + raise[1] < 1e-4) roundRectPath(ctx, -yw, YOKE_TOP, yw, YOKE_BOT, lerp(0.088, SIDE_W, tt));
+    else {
+      // 팔을 든 쪽은 어깨 블록이 줄어들어 윗모서리 = 팔 끝 반원, 그 아래는 몸통으로 바로 이어진다
+      const rt0 = Math.min(lerp(0.088, SIDE_W, tt), (YOKE_BOT - YOKE_TOP) / 2, yw);
+      for (let i = 0; i < 2; i++) {
+        const r = raise[i];
+        const rt = lerp(rt0, ARM_W / 2, r);
+        const bot = lerp(YOKE_BOT, RAISED_SHOULDER_Y, r);
+        if (i === 1) {
+          ctx.moveTo(0, YOKE_TOP);
+          ctx.lineTo(yw - rt, YOKE_TOP);
+          ctx.arcTo(yw, YOKE_TOP, yw, YOKE_TOP + rt, rt);
+          ctx.lineTo(yw, bot);
+          ctx.lineTo(0, bot);
+        } else {
+          ctx.moveTo(0, bot);
+          ctx.lineTo(-yw, bot);
+          ctx.lineTo(-yw, YOKE_TOP + rt);
+          ctx.arcTo(-yw, YOKE_TOP, -yw + rt, YOKE_TOP, rt);
+          ctx.lineTo(0, YOKE_TOP);
+        }
+        ctx.closePath();
+      }
+    }
+    // 옆모습에선 몸통 아래도 둥글게: 다리 끝 반원 안으로 숨어 엉덩이 모서리가 안 보인다
+    roundRectPath(ctx, -bw, YOKE_TOP + 0.04, bw, BODY_BOT, 0.02, lerp(0, SIDE_W, tt));
     ctx.restore();
   };
   const headPath = () => {
@@ -331,6 +365,28 @@ export function drawFigure(
     if (extras.held && !extras.heldBehind) drawHeld();
   } else {
     // 옆모습 모드: 먼 팔다리 → 몸통 → 가까운 팔다리
+    // 두 다리가 거의 겹치면 뒷다리를 앞다리에 붙인다 (가는 조각이 삐져나와 지저분해 보이지 않게)
+    {
+      const dk = Math.hypot(kn[far][0] - kn[near][0], kn[far][1] - kn[near][1]);
+      const df = Math.hypot(ft[far][0] - ft[near][0], ft[far][1] - ft[near][1]);
+      const w = clamp(1 - (Math.max(dk, df * 0.6) - 0.025) / 0.04);
+      if (w > 0) {
+        kn[far] = [lerp(kn[far][0], kn[near][0], w), lerp(kn[far][1], kn[near][1], w)];
+        ft[far] = [lerp(ft[far][0], ft[near][0], w), lerp(ft[far][1], ft[near][1], w)];
+      }
+    }
+    // 뒤쪽 팔이 몸통 뒤에 거의 가려지면 똑바로 내려 완전히 숨긴다 (손끝만 콩알처럼 비죽 나오지 않게)
+    {
+      const d = dir(th);
+      const e0: [number, number] = [sh[far][0] + d[0] * UPPER_ARM, sh[far][1] + d[1] * UPPER_ARM];
+      const h0: [number, number] = [e0[0] + d[0] * LOWER_ARM, e0[1] + d[1] * LOWER_ARM];
+      const dh = Math.hypot(hd[far][0] - h0[0], hd[far][1] - h0[1]);
+      const w = clamp(1 - (dh - 0.03) / 0.05);
+      if (w > 0) {
+        el[far] = [lerp(el[far][0], e0[0], w), lerp(el[far][1], e0[1], w)];
+        hd[far] = [lerp(hd[far][0], h0[0], w), lerp(hd[far][1], h0[1], w)];
+      }
+    }
     drawLimb(hp[far], kn[far], ft[far], LEG_W, style.farColor);
     drawLimb(sh[far], el[far], hd[far], ARM_W, style.farColor);
     if (extras.held && (extras.heldBehind || heldArm === far)) drawHeld();

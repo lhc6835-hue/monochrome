@@ -22,6 +22,8 @@ export interface Settings {
   music: number;
   shake: boolean;
   grain: boolean;
+  /** 바꾼 조작 키 (없으면 기본값) */
+  keys?: Partial<Record<'interact' | 'down' | 'jump' | 'left' | 'right', string[]>>;
 }
 
 export const defaultSettings: Settings = { master: 0.9, sfx: 1, amb: 0.8, music: 0.7, shake: true, grain: true };

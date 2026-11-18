@@ -20,4 +20,6 @@ npm run build:single   # dist/the-monochrome.html 한 파일 (효과음·글꼴 
 | 상호작용 · 꽃잎 건네기(길게) · 상자 잡기(누른 채) | E / X / Shift | 행동 |
 | 일시정지 | Esc / P | II |
 
+행동·굳기·점프·이동 키는 **설정 → 조작 키**에서 원하는 키로 바꿀 수 있습니다. (Esc, Enter, Tab, P, Backspace 는 메뉴용이라 쓸 수 없음)
+
 설계 문서: [`docs/DESIGN.md`](docs/DESIGN.md) · 에셋 출처: [`CREDITS.md`](CREDITS.md)

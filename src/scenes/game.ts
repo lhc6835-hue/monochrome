@@ -190,7 +190,10 @@ export class GameScene implements Scene, GameAPI {
     return this.byId.get(id) as T | undefined;
   }
   hint(kb: string, touch?: string, dur = 4) {
-    this.hintText = app.input.isTouch && touch ? touch : kb;
+    const inp = app.input;
+    const raw = inp.touchMode && touch ? touch : kb;
+    // {act} {down} {jump} 은 지금 설정된 키 이름으로 바뀐다
+    this.hintText = raw.replace(/\{(act|down|jump|left|right)\}/g, (_, k: string) => inp.label(k === 'act' ? 'interact' : (k as 'down' | 'jump' | 'left' | 'right')));
     this.hintT = 0;
     this.hintDur = dur;
   }
@@ -1166,11 +1169,12 @@ export class GameScene implements Scene, GameAPI {
     const pr = this.prompt;
     if (pr && this.mode === 'play') {
       const [sx, sy] = this.cam.toScreen(s, pr.x, pr.y - 40);
-      const key = app.input.isTouch ? '행동' : 'E';
+      const key = app.input.touchMode ? '행동' : app.input.label('interact');
       ctx.save();
       ctx.font = `500 20px ${KR}`;
-      const tw = ctx.measureText(pr.p.text).width;
-      const w = tw + (pr.p.disabled ? 32 : 82);
+      const label = pr.p.text + (pr.p.hold > 0 ? '  (길게)' : '');
+      const tw = ctx.measureText(label).width;
+      const w = tw + (pr.p.disabled ? 32 : 74);
       const x0 = sx - w / 2;
       const y0 = sy - 24 - Math.sin(this.t * 3) * 3;
       ctx.globalAlpha = 0.88;
@@ -1199,7 +1203,7 @@ export class GameScene implements Scene, GameAPI {
       ctx.fillStyle = pr.p.disabled ? '#8a8a87' : '#efefec';
       ctx.font = `500 20px ${KR}`;
       ctx.textAlign = 'left';
-      ctx.fillText(pr.p.text + (pr.p.hold > 0 ? '  (길게)' : ''), x0 + (pr.p.disabled ? 16 : 52), y0 + 30);
+      ctx.fillText(label, x0 + (pr.p.disabled ? 16 : 52), y0 + 30);
       ctx.restore();
     }
     // 힌트

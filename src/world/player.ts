@@ -120,7 +120,7 @@ export class Player implements PlayerLike {
     // ---------- 사다리 ----------
     if (this.state === 'climb' && this.ladder) {
       const L = this.ladder;
-      const upHeld = inp.down('up') || (inp.isTouch && inp.down('jump'));
+      const upHeld = inp.down('up') || (inp.touchMode && inp.down('jump'));
       const dir = (control && inp.down('down') ? 1 : 0) - (control && upHeld ? 1 : 0);
       b.vx = 0;
       b.vy = 0;
@@ -142,7 +142,7 @@ export class Player implements PlayerLike {
         this.state = 'normal';
         this.ladder = null;
       } else b.y = ny;
-      if (control && ((inp.pressed('jump') && !inp.down('up') && !inp.isTouch) || (inp.isTouch && inp.axisX !== 0))) {
+      if (control && ((inp.pressed('jump') && !inp.down('up') && !inp.touchMode) || (inp.touchMode && inp.axisX !== 0))) {
         this.state = 'normal';
         this.ladder = null;
         b.vy = -520;
@@ -156,7 +156,7 @@ export class Player implements PlayerLike {
         if (Math.abs(b.x - L.x) > 34) continue;
         const onBody = b.y > L.top + 4 && b.y - b.h < L.bottom;
         const atTop = Math.abs(b.y - L.top) < 6 && b.onGround;
-        if (((inp.down('up') || (inp.isTouch && inp.down('jump'))) && onBody) || (inp.down('down') && atTop)) {
+        if (((inp.down('up') || (inp.touchMode && inp.down('jump'))) && onBody) || (inp.down('down') && atTop)) {
           this.state = 'climb';
           this.ladder = L;
           this.buffer = 0;

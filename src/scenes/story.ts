@@ -450,7 +450,7 @@ export class StoryScene implements Scene {
     ctx.font = `400 16px ${KR}`;
     ctx.textAlign = 'right';
     ctx.fillStyle = this.skipArmed > 0 ? '#bdbdba' : '#4a4a48';
-    ctx.fillText(this.skipArmed > 0 ? 'Esc 를 한 번 더 누르면 건너뜁니다' : app.input.isTouch ? '화면을 눌러 넘기기' : 'Enter · Space 다음      Esc 건너뛰기', s.W - 40, s.H - 34);
+    ctx.fillText(this.skipArmed > 0 ? 'Esc 를 한 번 더 누르면 건너뜁니다' : app.input.touchMode ? '화면을 눌러 넘기기' : 'Enter · Space 다음      Esc 건너뛰기', s.W - 40, s.H - 34);
     app.post.apply(s, dt, 0.35, 0.06);
     if (this.fadeOut >= 0) app.post.fill(s, '#000', clamp(this.fadeOut / 1.4));
   }

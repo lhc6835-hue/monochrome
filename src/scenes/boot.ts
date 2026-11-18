@@ -61,7 +61,7 @@ export class BootScene implements Scene {
     const a = 0.55 + 0.35 * Math.sin(this.t * 2.2);
     if (this.state === 'wait') {
       ctx.fillStyle = `rgba(235,235,232,${a})`;
-      ctx.fillText(app.input.isTouch ? '화면을 눌러 시작하세요' : '클릭하거나 아무 키나 눌러 시작하세요', s.W / 2, s.H / 2);
+      ctx.fillText(app.input.touchMode ? '화면을 눌러 시작하세요' : '클릭하거나 아무 키나 눌러 시작하세요', s.W / 2, s.H / 2);
       ctx.fillStyle = 'rgba(150,150,147,0.8)';
       ctx.font = '400 19px "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
       ctx.fillText('헤드폰 사용을 권장합니다', s.W / 2, s.H / 2 + 48);

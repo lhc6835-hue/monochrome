@@ -42,6 +42,7 @@ class App {
     audio.volumes = { master: s.master, sfx: s.sfx, amb: s.amb, music: s.music };
     audio.applyVolumes();
     this.post.enabled = s.grain;
+    this.input?.setBinds(s.keys);
     Save.storeSettings(s);
   }
 

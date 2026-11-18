@@ -132,18 +132,18 @@ const entities: EntityDef[] = [
 ];
 
 const triggers: TriggerDef[] = [
-  { id: 'h_move', x: -200, w: 300, once: true, hint: { kb: '←  →   이동', touch: '◀ ▶   이동', dur: 4 } },
-  { id: 'h_jump', x: 820, w: 200, once: true, hint: { kb: 'Space  또는  ↑   점프', touch: '점프 버튼으로 뛰어오르기', dur: 4 } },
+  { id: 'h_move', x: -200, w: 300, once: true, hint: { kb: '{left}  {right}   이동', touch: '◀ ▶   이동', dur: 4 } },
+  { id: 'h_jump', x: 820, w: 200, once: true, hint: { kb: '{jump}   점프', touch: '점프 버튼으로 뛰어오르기', dur: 4 } },
   { id: 'h_climb', x: 1250, w: 100, once: true, hint: { kb: '턱에 매달리면 저절로 기어오릅니다', dur: 3.5 } },
   { id: 'cp_b', x: 1650, w: 80, checkpoint: true },
-  { id: 'h_box', x: 1880, w: 120, once: true, hint: { kb: '상자는 밀 수 있다  ·  E 를 누른 채로 당기기', touch: '상자는 밀 수 있다  ·  행동 버튼을 누른 채로 당기기', dur: 5 } },
+  { id: 'h_box', x: 1880, w: 120, once: true, hint: { kb: '상자는 밀 수 있다  ·  {act} 를 누른 채로 당기기', touch: '상자는 밀 수 있다  ·  행동 버튼을 누른 채로 당기기', dur: 5 } },
   { id: 'cp_c', x: 3420, w: 80, checkpoint: true },
   { id: 'kid_bye', x: 5130, w: 80, once: true, script: 'kidBye' },
   { id: 'cp_d', x: 5250, w: 80, checkpoint: true },
-  { id: 'h_freeze', x: 5330, w: 120, once: true, hint: { kb: '↓ 를 누르고 있으면 굳는다  ·  감시의 눈은 움직이는 것만 본다', touch: '굳기 버튼을 누르고 있으면 굳는다  ·  감시의 눈은 움직이는 것만 본다', dur: 6 } },
+  { id: 'h_freeze', x: 5330, w: 120, once: true, hint: { kb: '{down} 를 누르고 있으면 굳는다  ·  감시의 눈은 움직이는 것만 본다', touch: '굳기 버튼을 누르고 있으면 굳는다  ·  감시의 눈은 움직이는 것만 본다', dur: 6 } },
   { id: 'cp_e', x: 7330, w: 80, checkpoint: true, spawnX: 7360 },
   { id: 'chase', x: 7620, w: 60, once: true, script: 'chase' },
-  { id: 'h_slide', x: 8700, w: 60, once: true, hint: { kb: '달리면서 ↓   미끄러지기', touch: '달리면서 굳기 버튼   미끄러지기', dur: 2.2 } },
+  { id: 'h_slide', x: 8700, w: 60, once: true, hint: { kb: '달리면서 {down}   미끄러지기', touch: '달리면서 굳기 버튼   미끄러지기', dur: 2.2 } },
   { id: 'end', x: 10760, w: 200, y: 20, h: 800, once: true, script: 'end' },
 ];
 
@@ -195,7 +195,7 @@ function* end(g: GameAPI): Co {
 
 function* opening(g: GameAPI): Co {
   yield 1.6;
-  g.hint('←  →   이동', '◀ ▶   이동', 4);
+  g.hint('{left}  {right}   이동', '◀ ▶   이동', 4);
 }
 
 export const town: LevelDef = {

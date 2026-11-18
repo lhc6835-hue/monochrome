@@ -92,7 +92,7 @@ const triggers: TriggerDef[] = [
   { id: 'h_press', x: 2250, w: 100, once: true, hint: { kb: '프레스는 내려오기 직전에 떨린다  ·  상자를 밀어 넣으면 멈춘다', dur: 5 } },
   { id: 'cp_f2', x: 3480, w: 60, checkpoint: true },
   { id: 'beltStart', x: 3560, w: 60, once: true, script: 'beltStart' },
-  { id: 'h_scan', x: 4300, w: 60, y: -300, h: 300, once: true, hint: { kb: '검수대는 움직이는 것을 통과시키지 않는다  ·  ↓ 굳어서, 제품처럼', touch: '검수대는 움직이는 것을 통과시키지 않는다  ·  굳어서, 제품처럼', dur: 6 } },
+  { id: 'h_scan', x: 4300, w: 60, y: -300, h: 300, once: true, hint: { kb: '검수대는 움직이는 것을 통과시키지 않는다  ·  {down} 굳어서, 제품처럼', touch: '검수대는 움직이는 것을 통과시키지 않는다  ·  굳어서, 제품처럼', dur: 6 } },
   { id: 'cp_f3', x: 6500, w: 80, y: -800, h: 400, checkpoint: true, spawnX: 6520, spawnY: -560 },
   { id: 'cp_f4', x: 8420, w: 80, y: -300, h: 400, checkpoint: true },
   { id: 'giantStart', x: 8640, w: 60, once: true, script: 'giant' },

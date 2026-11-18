@@ -1,6 +1,7 @@
 import { app, type Scene } from '../app';
 import { audio } from '../core/audio';
 import { Save } from '../core/save';
+import { DEFAULT_BINDS, RESERVED, keyName, type Bindable } from '../core/input';
 import { clamp, ease, type EaseFn } from '../core/math';
 import { drawFlower, drawGlow, PETAL_COLORS } from '../gfx/flower';
 import { GameScene } from './game';
@@ -68,7 +69,7 @@ export class TitleScene implements Scene {
       });
       const hint = document.createElement('p');
       hint.className = 'menu-hint';
-      hint.textContent = app.input.isTouch ? '' : '↑ ↓ 선택 · Enter 결정';
+      hint.textContent = app.input.touchMode ? '' : '↑ ↓ 선택 · Enter 결정';
       m.appendChild(hint);
     }
     app.ui.appendChild(m);
@@ -206,6 +207,7 @@ export function settingsPanel(onBack: () => void) {
   row('음악', 'music');
   toggle('필름 노이즈', 'grain');
   toggle('화면 흔들림', 'shake');
+  wrap.appendChild(keyBindSection());
   const back = document.createElement('button');
   back.textContent = '돌아가기';
   back.onclick = () => {
@@ -280,4 +282,89 @@ function drawSpaced(ctx: CanvasRenderingContext2D, text: string, cx: number, y: 
     x += ws[i] + sp;
   });
   ctx.textAlign = al;
+}
+
+// ------------------------------------------------------------------
+// 조작 키 설정
+// ------------------------------------------------------------------
+const BIND_ROWS: [Bindable, string][] = [
+  ['interact', '행동 · 꽃잎 건네기 · 잡기'],
+  ['down', '굳기 · 미끄러지기'],
+  ['jump', '점프'],
+  ['left', '왼쪽'],
+  ['right', '오른쪽'],
+];
+
+function keyBindSection() {
+  const box = document.createElement('div');
+  box.className = 'keybinds';
+  const title = document.createElement('p');
+  title.className = 'kb-title';
+  title.textContent = '조작 키  ·  버튼을 누른 뒤 원하는 키를 누르세요';
+  box.appendChild(title);
+  const btns = new Map<Bindable, HTMLButtonElement>();
+  const current = () => ({ ...DEFAULT_BINDS, ...(app.settings.keys ?? {}) });
+  const refresh = () => {
+    const b = current();
+    for (const [a, el] of btns) el.textContent = [...new Set(b[a].map(keyName))].join('  ·  ') || '없음';
+  };
+  let cancelCapture: (() => void) | null = null;
+  for (const [act, label] of BIND_ROWS) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const span = document.createElement('span');
+    span.textContent = label;
+    const btn = document.createElement('button');
+    btn.className = 'keycap';
+    btn.onclick = () => {
+      cancelCapture?.();
+      btn.textContent = '키를 누르세요…';
+      btn.classList.add('wait');
+      const onKey = (e: KeyboardEvent) => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.code === 'Escape') return finish();
+        if (RESERVED.includes(e.code)) {
+          btn.textContent = `${keyName(e.code)} 는 쓸 수 없어요`;
+          return;
+        }
+        const b = current();
+        // 다른 조작에서 같은 키를 빼고, 비면 기본값으로 되돌린다
+        for (const k of Object.keys(b) as Bindable[]) {
+          if (k === act) continue;
+          const rest = b[k].filter((c) => c !== e.code);
+          b[k] = rest.length ? rest : DEFAULT_BINDS[k].filter((c) => c !== e.code);
+        }
+        b[act] = [e.code];
+        app.settings.keys = b;
+        app.applySettings();
+        audio.play('click2', { vol: 0.4 });
+        finish();
+      };
+      const finish = () => {
+        window.removeEventListener('keydown', onKey, true);
+        btn.classList.remove('wait');
+        cancelCapture = null;
+        refresh();
+      };
+      cancelCapture = finish;
+      setTimeout(() => window.addEventListener('keydown', onKey, true), 0);
+    };
+    btns.set(act, btn);
+    row.append(span, btn);
+    box.appendChild(row);
+  }
+  const reset = document.createElement('button');
+  reset.className = 'kb-reset';
+  reset.textContent = '기본 키로 되돌리기';
+  reset.onclick = () => {
+    cancelCapture?.();
+    app.settings.keys = undefined;
+    app.applySettings();
+    audio.play('click2', { vol: 0.4 });
+    refresh();
+  };
+  box.appendChild(reset);
+  refresh();
+  return box;
 }

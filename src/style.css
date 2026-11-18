@@ -235,3 +235,46 @@ canvas#game {
     display: flex;
   }
 }
+
+/* ---------- 조작 키 ---------- */
+.keybinds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #2c2c2a;
+}
+.keybinds .kb-title {
+  margin: 0 0 4px;
+  font: 400 13px var(--kr);
+  color: #6f6f6c;
+  letter-spacing: 0.06em;
+}
+.settings .keybinds button.keycap {
+  min-width: 120px;
+  padding: 6px 14px;
+  border: 1px solid #4a4a47;
+  border-radius: 6px;
+  color: #e8e8e5;
+  font: 500 15px var(--kr);
+  letter-spacing: 0.04em;
+}
+.settings .keybinds button.keycap.wait {
+  border-color: #e8e8e5;
+  color: #ffd43b;
+}
+.settings .keybinds button.kb-reset {
+  font-size: 14px;
+  color: #7c7c79;
+  padding: 6px;
+}
+.pause .settings,
+.title-menu .settings {
+  max-height: 86vh;
+  overflow-y: auto;
+}
+.title-menu:has(.settings) {
+  top: 50%;
+  transform: translate(-50%, -50%);
+}

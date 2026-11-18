@@ -1,28 +1,62 @@
 export type Action = 'left' | 'right' | 'up' | 'down' | 'jump' | 'interact' | 'pause' | 'confirm' | 'back';
 
-const KEYMAP: Record<string, Action[]> = {
-  ArrowLeft: ['left'],
-  KeyA: ['left'],
-  ArrowRight: ['right'],
-  KeyD: ['right'],
-  ArrowUp: ['up', 'jump'],
-  KeyW: ['up', 'jump'],
-  ArrowDown: ['down'],
-  KeyS: ['down'],
-  KeyC: ['down'],
-  Space: ['jump', 'confirm'],
-  KeyZ: ['jump', 'confirm'],
-  KeyK: ['jump'],
-  KeyE: ['interact'],
-  KeyX: ['interact'],
-  KeyJ: ['interact'],
-  ShiftLeft: ['interact'],
-  ShiftRight: ['interact'],
+/** 바꿀 수 있는 조작 */
+export type Bindable = 'interact' | 'down' | 'jump' | 'left' | 'right';
+export type Binds = Record<Bindable, string[]>;
+
+export const DEFAULT_BINDS: Binds = {
+  interact: ['KeyE', 'KeyX', 'ShiftLeft', 'ShiftRight'],
+  down: ['ArrowDown', 'KeyS'],
+  jump: ['Space', 'KeyZ', 'ArrowUp', 'KeyW'],
+  left: ['ArrowLeft', 'KeyA'],
+  right: ['ArrowRight', 'KeyD'],
+};
+
+/** 바꿀 수 없는 키 (메뉴용) */
+export const RESERVED = ['Escape', 'Enter', 'Tab', 'KeyP', 'Backspace'];
+
+const FIXED: Record<string, Action[]> = {
+  ArrowUp: ['up'],
+  KeyW: ['up'],
+  Space: ['confirm'],
+  KeyZ: ['confirm'],
   Enter: ['confirm', 'interact'],
   Escape: ['pause', 'back'],
   KeyP: ['pause'],
   Backspace: ['back'],
 };
+
+function buildKeymap(b: Binds): Record<string, Action[]> {
+  const map: Record<string, Action[]> = {};
+  const used = new Set<string>();
+  for (const [a, codes] of Object.entries(b) as [Bindable, string[]][]) for (const c of codes) used.add(c);
+  for (const [code, acts] of Object.entries(FIXED)) {
+    // 다른 조작에 쓰인 키라면 사다리 '위' 기능은 빼고 메뉴 기능만 남긴다
+    const keep = acts.filter((a) => !(a === 'up' && used.has(code) && !b.jump.includes(code)));
+    if (keep.length) map[code] = [...keep];
+  }
+  for (const [a, codes] of Object.entries(b) as [Bindable, string[]][]) {
+    for (const c of codes) (map[c] ??= []).push(a);
+  }
+  return map;
+}
+
+const KEY_NAMES: Record<string, string> = {
+  ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Space: 'Space',
+  ShiftLeft: 'Shift', ShiftRight: 'Shift', ControlLeft: 'Ctrl', ControlRight: 'Ctrl',
+  AltLeft: 'Alt', AltRight: 'Alt', MetaLeft: 'Cmd', MetaRight: 'Cmd', CapsLock: 'CapsLock',
+  Comma: ',', Period: '.', Slash: '/', Semicolon: ';', Quote: "'", BracketLeft: '[', BracketRight: ']',
+  Backslash: '\\', Minus: '-', Equal: '=', Backquote: '`',
+};
+export function keyName(code: string) {
+  if (KEY_NAMES[code]) return KEY_NAMES[code];
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'Num ' + code.slice(6);
+  return code;
+}
+
+let KEYMAP: Record<string, Action[]> = buildKeymap(DEFAULT_BINDS);
 
 /** 키보드 + 터치 통합 입력 */
 export class Input {
@@ -34,6 +68,26 @@ export class Input {
   isTouch = false;
   private touchRoot: HTMLElement | null = null;
   touchVisible = false;
+  /** 터치 기기에서 키보드를 쓰기 시작하면 터치 버튼을 숨긴다 */
+  kbMode = false;
+  binds: Binds = { ...DEFAULT_BINDS };
+
+  get touchMode() {
+    return this.isTouch && !this.kbMode;
+  }
+
+  setBinds(b: Partial<Binds> | undefined) {
+    this.binds = { ...DEFAULT_BINDS, ...(b ?? {}) } as Binds;
+    KEYMAP = buildKeymap(this.binds);
+    for (const a of [...this.held.keys()]) this.releasedSet.add(a);
+    this.held.clear();
+  }
+
+  /** 조작에 쓰이는 대표 키 이름 */
+  label(a: Bindable) {
+    const c = this.binds[a][0];
+    return c ? keyName(c) : '?';
+  }
 
   constructor() {
     window.addEventListener('keydown', (e) => {
@@ -42,6 +96,10 @@ export class Input {
         return;
       }
       this.anyPressedFlag = true;
+      if (this.isTouch && !this.kbMode) {
+        this.kbMode = true;
+        if (this.touchRoot) this.touchRoot.style.display = 'none';
+      }
       const acts = KEYMAP[e.code];
       if (!acts) return;
       e.preventDefault();
@@ -59,7 +117,13 @@ export class Input {
     window.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch') this.enableTouch();
     });
-    window.addEventListener('touchstart', () => this.enableTouch(), { passive: true });
+    window.addEventListener('touchstart', () => {
+      this.enableTouch();
+      if (this.kbMode) {
+        this.kbMode = false;
+        if (this.touchRoot) this.touchRoot.style.display = this.touchVisible ? 'block' : 'none';
+      }
+    }, { passive: true });
     if (matchMedia('(pointer: coarse)').matches) this.enableTouch();
   }
 
@@ -123,7 +187,7 @@ export class Input {
 
   setTouchVisible(v: boolean) {
     this.touchVisible = v;
-    if (this.touchRoot) this.touchRoot.style.display = v ? 'block' : 'none';
+    if (this.touchRoot) this.touchRoot.style.display = v && !this.kbMode ? 'block' : 'none';
   }
 
   private buildTouchUI() {

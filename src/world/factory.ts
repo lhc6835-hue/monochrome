@@ -3,6 +3,7 @@ import { Box, Cctv, Faller, Gate, Memory, PetalPickup, Plate, Resident, type Ent
 import { Echo, Ladder, Lever, Shaft, Water } from './entities2';
 import { Conveyor, GiantStamp, Lift, Press, Scanner, Train } from './entities3';
 import { Hazard, TrainCar } from './entities4';
+import { Recorder } from './entities5';
 
 export function createEntity(def: EntityDef): Entity {
   switch (def.type) {
@@ -48,5 +49,7 @@ export function createEntity(def: EntityDef): Entity {
       return new TrainCar(def);
     case 'hazard':
       return new Hazard(def);
+    case 'recorder':
+      return new Recorder(def);
   }
 }

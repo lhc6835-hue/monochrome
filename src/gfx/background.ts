@@ -234,3 +234,34 @@ export function fieldTheme(seed = 44): BgTheme {
   };
   return { skyTop: '#a9a9a5', skyMid: '#d2d1cc', skyBot: '#c8c7c2', layers: [far, mid, near] };
 }
+
+/** 기록 보관소: 끝없이 겹쳐진 서가 */
+export function archiveTheme(width: number, seed = 55): BgTheme {
+  const rng = mulberry32(seed);
+  const far: BgLayer = {
+    p: 0.2,
+    color: '#5a5955',
+    ground: 200,
+    band: '#4a4945',
+    items: scatter(rng, -1200, width * 0.2 + 2600, 150, 180, (x) => [
+      { icon: 'bookshelf', x, h: 300, y: 0 },
+      { icon: 'bookshelf', x, h: 300, y: -300 },
+      { icon: 'bookshelf', x, h: 300, y: -600 },
+      { icon: 'bookshelf', x, h: 300, y: -900 },
+      { icon: 'bookshelf', x, h: 300, y: -1200 },
+    ]),
+  };
+  const mid: BgLayer = {
+    p: 0.5,
+    color: '#3e3d3a',
+    ground: 100,
+    band: '#353431',
+    items: scatter(rng, -1200, width * 0.5 + 2400, 420, 900, (x) => {
+      const r = rng();
+      if (r < 0.6) return [{ icon: 'bookshelf' as IconName, x, h: 420 }, { icon: 'bookshelf' as IconName, x, h: 420, y: -420 }];
+      if (r < 0.8) return { icon: 'ladder' as IconName, x, h: 700 };
+      return { icon: 'bulb' as IconName, x, h: 80, y: -620 };
+    }),
+  };
+  return { skyTop: '#2c2b29', skyMid: '#403f3b', skyBot: '#3a3935', layers: [far, mid] };
+}

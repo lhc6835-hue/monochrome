@@ -10,6 +10,7 @@ const SOUND_FILES = [
   'splash1', 'splash2', 'splash3', 'bubble1', 'bubble2', 'drip1', 'drip2', 'amb_drain', 'amb_dungeon', 'amb_rumble',
   'water_loop', 'mstep1', 'mstep2', 'mstep3', 'mstep4', 'machine', 'valve', 'rattle',
   'amb_factory', 'conveyor', 'machine_loop', 'alarm_loop', 'train_engine', 'whistle', 'hiss1', 'hiss2',
+  'flip1', 'flip2', 'flip3', 'typewriter', 'squeak',
 ] as const;
 export type SoundName = (typeof SOUND_FILES)[number];
 

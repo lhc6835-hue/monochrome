@@ -215,7 +215,7 @@ export class Player implements PlayerLike {
     }
     if (this.state === 'normal' && control && !this.grabbing) {
       for (const L of g.ladders()) {
-        if (Math.abs(b.x - L.x) > 34) continue;
+        if (Math.abs(b.x - L.x) > 40) continue;
         const onBody = b.y > L.top + 4 && b.y - b.h < L.bottom;
         const atTop = Math.abs(b.y - L.top) < 6 && b.onGround;
         if (((inp.down('up') || (inp.touchMode && inp.down('jump'))) && onBody) || (inp.down('down') && atTop)) {

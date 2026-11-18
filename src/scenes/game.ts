@@ -16,10 +16,20 @@ import { Player, PH } from '../world/player';
 import { Box, Entity, Resident, type Prompt } from '../world/entities';
 import { createEntity } from '../world/factory';
 import { Echo, Ladder, Shaft, Water, type Light } from '../world/entities2';
+import type { Recorder } from '../world/entities5';
+import { clonePose, defaultStyle, drawFigure, type Pose } from '../gfx/figure';
 import { moveBody, type Body, type Solid } from '../world/physics';
 import type { GameAPI, LevelDef, TriggerDef } from '../world/types';
 import { LEVELS, LEVEL_ORDER } from '../world/levels';
 import { settingsPanel } from './title';
+
+interface GhostFrame {
+  x: number;
+  y: number;
+  onG: boolean;
+  pose: Pose;
+  dt: number;
+}
 
 type Mode = 'play' | 'dying' | 'memory' | 'paused' | 'ending' | 'transition';
 
@@ -78,6 +88,14 @@ export class GameScene implements Scene, GameAPI {
   private hintDur = 0;
   chase = { active: false, front: 0, speed: 0, t: 0, max: 318 };
   trainSpeed = 0;
+  /** 기록대 */
+  recording = false;
+  recordK = 0;
+  private rec: { t: number; dur: number; frames: GhostFrame[]; x: number; y: number; facing: number } | null = null;
+  private ghost: { frames: GhostFrame[]; i: number; fade: number } | null = null;
+  private tickT = 0;
+  /** 아래에서 차오르는 여백 */
+  flood = { active: false, y: 0, t: 0, max: 120 };
   travel = 0;
   wind = 0;
   darkBoost = 0;
@@ -230,6 +248,11 @@ export class GameScene implements Scene, GameAPI {
     if (this.mode !== 'play' || this.player.state === 'dead' || this.co.running('end')) return;
     this.player.die(cause);
     this.mode = 'dying';
+    if (this.recording) {
+      this.recording = false;
+      this.rec = null;
+      audio.stopLoop('rec', 0.3);
+    }
     this.dieT = 0;
     this.deaths++;
     this.fadeColor = cause === 'erase' ? PAPER : '#000';
@@ -337,6 +360,8 @@ export class GameScene implements Scene, GameAPI {
     const on = (bx: number, by: number, w: number, grounded: boolean) => grounded && Math.abs(by - y) < 4 && bx + w / 2 > x0 + 8 && bx - w / 2 < x1 - 8;
     const p = this.player.body;
     if (this.player.state !== 'dead' && on(p.x, p.y, p.w, p.onGround)) return true;
+    const gf = this.ghostFrame();
+    if (gf && on(gf.x, gf.y, 40, gf.onG)) return true;
     for (const e of this.ents) {
       if (e instanceof Box && on(e.body.x, e.body.y, e.body.w, e.body.onGround)) return true;
       if (e instanceof Resident && e.state !== 'gone' && e.state !== 'frozen' && on(e.body.x, e.body.y, e.body.w, true)) return true;
@@ -412,6 +437,10 @@ export class GameScene implements Scene, GameAPI {
     this.co.stopAll();
     this.flights = [];
     this.erased.clear();
+    this.rec = null;
+    this.recording = false;
+    this.ghost = null;
+    this.flood.active = false;
     this.control = true;
     this.solidCache = null;
     this.wind = 0;
@@ -488,6 +517,8 @@ export class GameScene implements Scene, GameAPI {
     this.interactions(dt);
     this.triggers();
     this.updateChase(dt);
+    this.updateRecording(dt);
+    this.updateFlood(dt);
     this.updateFlights(dt);
     this.co.update(dt);
 
@@ -937,6 +968,9 @@ export class GameScene implements Scene, GameAPI {
 
     this.darkNow = damp(this.darkNow, Math.max(this.level.dark ?? 0, this.darkBoost), 6, dt);
     if (this.darkNow > 0.01) this.drawDarkness(this.darkNow);
+    this.drawGhost();
+    if (this.flood.active) this.drawFlood(v);
+    if (this.recording) app.post.fill(s, '#ffffff', 0.04 + Math.sin(this.t * 6) * 0.015);
 
     // 근경
     cam.apply(ctx, s, 1.3);
@@ -976,8 +1010,155 @@ export class GameScene implements Scene, GameAPI {
     if (this.mode === 'transition') app.post.fill(s, '#000', clamp(this.transT / 1.4));
   }
 
+  // ------------------------------------------------------------------
+  // 기록대: 기록 → 되감기 → 과거의 나
+  // ------------------------------------------------------------------
+  startRecording(r: Recorder) {
+    const p = this.player;
+    this.ghost = null;
+    this.rec = { t: 0, dur: r.dur, frames: [], x: p.x, y: p.y, facing: p.facing };
+    this.recording = true;
+    this.recordK = 0;
+    audio.play('switch', { vol: 0.6 });
+    audio.play('typewriter', { vol: 0.5 });
+    audio.loop('rec', 'time_loop', 0.25, 0.5, 'sfx');
+  }
+  private updateRecording(dt: number) {
+    const r = this.rec;
+    if (r && this.mode === 'play') {
+      r.t += dt;
+      this.recordK = Math.min(1, r.t / r.dur);
+      const b = this.player.body;
+      r.frames.push({ x: b.x, y: b.y, onG: b.onGround, pose: clonePose(this.player.pose), dt });
+      this.tickT -= dt;
+      if (this.tickT <= 0) {
+        audio.play('typewriter', { vol: 0.22 + this.recordK * 0.2, rate: 0.9 + Math.random() * 0.2 });
+        this.tickT = r.dur - r.t < 2 ? 0.12 : 0.33;
+      }
+      if (r.t >= r.dur) {
+        // 되감기: 처음 자리로, 기록은 '과거의 나'가 된다
+        this.recording = false;
+        this.rec = null;
+        this.ghost = { frames: r.frames, i: 0, fade: 1 };
+        this.player.place(r.x, r.y);
+        this.player.facing = r.facing;
+        audio.stopLoop('rec', 0.3);
+        audio.play('weird2', { vol: 0.6, rate: 0.7 });
+        audio.play('flip1', { vol: 0.6 });
+        audio.play('flip2', { vol: 0.5, delay: 0.1 });
+        this.fadeColor = '#ffffff';
+        this.fadeA = 0.55;
+        this.parts.paper(r.x, r.y - 70, 10, 0.6);
+      }
+    }
+    const gh = this.ghost;
+    if (gh) {
+      let left = dt;
+      while (left > 0 && gh.i < gh.frames.length - 1) {
+        const f = gh.frames[Math.floor(gh.i)];
+        const step = Math.min(left, f.dt);
+        gh.i += step / Math.max(f.dt, 1e-4);
+        left -= step;
+      }
+      if (gh.i >= gh.frames.length - 1) {
+        gh.fade -= dt * 1.6;
+        if (gh.fade <= 0) this.ghost = null;
+      }
+    }
+  }
+  private ghostFrame(): GhostFrame | null {
+    const gh = this.ghost;
+    if (!gh || gh.fade < 0.5) return null;
+    return gh.frames[Math.min(gh.frames.length - 1, Math.floor(gh.i))] ?? null;
+  }
+  private drawGhost() {
+    const gh = this.ghost;
+    if (!gh) return;
+    const f = gh.frames[Math.min(gh.frames.length - 1, Math.floor(gh.i))];
+    if (!f) return;
+    const s = app.screen;
+    const L = app.fxLayer;
+    s.clearLayer(L);
+    this.cam.apply(L.ctx, s, 1);
+    const st = defaultStyle();
+    st.color = '#ecebe6';
+    st.farColor = '#c9c8c3';
+    st.alpha = 0.82 * gh.fade;
+    // 과거의 나도 꽃을 들고 있다 (희미하게) — 메아리나 여백과 헷갈리지 않게
+    const pet = this.petals;
+    drawFigure(L.ctx, f.pose as Pose, f.x, f.y, PH.SCALE, st, {
+      held: pet.length ? (fc, hx, hy) => drawFlower(fc, hx, hy + 4, 22, pet, { stem: 1.25, alpha: 0.55 * gh.fade }) : undefined,
+    });
+    s.composite(L);
+    if (Math.random() < 0.3) this.parts.add({ t: 'spark', x: f.x + rand(-20, 20), y: f.y - rand(10, 140), vy: -30, life: 0.6, size: 3, color: '#f0f0ec', drag: 1 });
+  }
+
+  // ------------------------------------------------------------------
+  // 아래에서 차오르는 여백
+  // ------------------------------------------------------------------
+  startFlood(o: { startOffset?: number; max?: number } = {}) {
+    this.flood = { active: true, y: this.player.y + (o.startOffset ?? 650), t: 0, max: o.max ?? 120 };
+  }
+  stopFlood() {
+    this.flood.active = false;
+  }
+  private updateFlood(dt: number) {
+    const f = this.flood;
+    if (!f.active) return;
+    f.t += dt;
+    const gap = f.y - this.player.y;
+    let sp = Math.min(f.max, 30 + f.t * 22);
+    if (gap > 950) sp = 320;
+    else if (gap > 650) sp *= 1.5;
+    if (this.mode === 'dying') sp = 60;
+    f.y -= sp * dt;
+    if (this.player.y > f.y - 6 && this.player.state !== 'dead') this.kill('erase');
+    if (Math.random() < dt * 10) this.parts.paper(this.player.x + rand(-700, 700), f.y - 10, 1, 0.6);
+    const hb = audio.getLoop('heart');
+    if (hb) hb.setVol(Math.max(0.25, Math.min(1, 1.2 - gap / 700)), 0.3);
+  }
+  private drawFlood(v: { x0: number; x1: number; y0: number; y1: number }) {
+    const s = app.screen;
+    const ctx = s.ctx;
+    const f = this.flood;
+    // 하얀 손이 종이 밖으로 뻗어 나온다
+    const L = app.fxLayer;
+    s.clearLayer(L);
+    this.cam.apply(L.ctx, s, 1);
+    const P = rigidPose();
+    P.arms[0].a = 2.75 + Math.sin(this.t * 1.7) * 0.15;
+    P.arms[1].a = 2.65 + Math.sin(this.t * 1.7 + 1) * 0.15;
+    P.arms[0].b = P.arms[1].b = 0.1;
+    P.headTilt = Math.sin(this.t * 0.8) * 0.1;
+    drawBlankFigure(L.ctx, P, this.player.x - 60, f.y + 330, 420, this.t);
+    s.composite(L);
+    this.cam.apply(ctx, s, 1);
+    const frame = Math.floor(this.t * 12);
+    const edge = (x: number) => f.y + Math.sin(x * 0.01 + this.t) * 10 + Math.sin(x * 0.043 + frame * 0.4) * 5;
+    ctx.fillStyle = PAPER;
+    ctx.beginPath();
+    ctx.moveTo(v.x0 - 60, v.y1 + 400);
+    for (let x = v.x0 - 60; x <= v.x1 + 60; x += 30) ctx.lineTo(x, edge(x));
+    ctx.lineTo(v.x1 + 60, v.y1 + 400);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(25,25,25,0.55)';
+    ctx.lineWidth = 2;
+    for (let k = 0; k < 3; k++) {
+      ctx.beginPath();
+      for (let x = v.x0 - 60; x <= v.x1 + 60; x += 30) {
+        const y = edge(x) + (Math.sin(x * 0.3 + frame + k * 7) * 3);
+        if (x === v.x0 - 60) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  }
+
   private collectLights(): Light[] {
     const out: Light[] = [];
+    const gf = this.ghost ? this.ghost.frames[Math.min(this.ghost.frames.length - 1, Math.floor(this.ghost.i))] : null;
+    if (gf) out.push({ kind: 'circle', x: gf.x, y: gf.y - 80, r: 170, a: 0.5 * (this.ghost?.fade ?? 0) });
     const p = this.player;
     const j = p.joints;
     if (j && p.state !== 'dead') {
@@ -1127,6 +1308,22 @@ export class GameScene implements Scene, GameAPI {
         for (let x = so.x + 10; x < so.x + so.w; x += 40) ctx.fillRect(x, so.y - 50, 6, 50);
         ctx.fillRect(so.x, so.y - 54, so.w, 6);
         return;
+      case 'shelf': {
+        // 책장: 검은 판 + 책등
+        drawBlock(ctx, so.x, so.y, so.w, so.h);
+        const rows = Math.max(1, Math.floor(so.h / 70));
+        for (let r = 0; r < rows; r++) {
+          const y0 = so.y + 10 + r * 70;
+          for (let x = so.x + 8, i = 0; x < so.x + so.w - 14; i++) {
+            const bw = 8 + ((i * 37 + r * 13 + Math.floor(so.x)) % 9);
+            const bh = 34 + ((i * 53 + r * 7) % 20);
+            ctx.fillStyle = (i + r) % 5 === 0 ? '#6c6b67' : '#3b3a37';
+            ctx.fillRect(x, y0 + 54 - bh, bw - 2, bh);
+            x += bw;
+          }
+        }
+        return;
+      }
       case 'crate':
         ctx.fillStyle = INK;
         ctx.beginPath();
@@ -1324,6 +1521,7 @@ export class GameScene implements Scene, GameAPI {
       drain: '위에서 기계 소리가 들려왔다. 쿵, 쿵, 쿵.',
       factory: '기차는 회색 들판을 가로질러 달렸다.',
       rail: '끊어진 다리 너머에는, 끝없는 서가가 있었다.',
+      archive: '천창 너머로, 바람에 흔들리는 회색 숲이 보였다.',
     };
     line(closing[this.level.id] ?? '', s.H * 0.38, 2.0, 26);
     line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${this.memories.size} / ${mems}`, s.H * 0.5, 4.0, 19, '#8d8d8a');

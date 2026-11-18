@@ -72,7 +72,9 @@ export type EntityDef =
   /** 열차 칸 (그림만, 충돌은 레벨의 solids 로) */
   | { type: 'car'; id: string; x: number; w: number; kind: 'box' | 'flat' | 'container' | 'passenger' | 'tender' | 'loco' }
   /** 열차를 스쳐 지나가는 것들: 머리 높이 빔, 철교 하단 철골, 터널, 끊긴 다리 */
-  | { type: 'hazard'; id: string; kind: 'beam' | 'bar' | 'tunnel' | 'cliff'; w?: number };
+  | { type: 'hazard'; id: string; kind: 'beam' | 'bar' | 'tunnel' | 'cliff'; w?: number }
+  /** 기록대: 움직임을 기록했다가 '과거의 나'로 되풀이한다 */
+  | { type: 'recorder'; id: string; x: number; y?: number; dur?: number };
 
 export interface TriggerDef {
   id: string;
@@ -159,6 +161,9 @@ export interface GameAPI {
   sheltered(x: number, y: number): boolean;
   shake(v: number): void;
   startChase(opts?: { speed?: number; startOffset?: number; max?: number }): void;
+  /** 아래에서 차오르는 여백 (수직 추격) */
+  startFlood(opts?: { startOffset?: number; max?: number }): void;
+  stopFlood(): void;
   stopChase(): void;
   chaseActive(): boolean;
   setControl(on: boolean): void;

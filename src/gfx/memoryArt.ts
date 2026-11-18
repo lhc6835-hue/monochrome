@@ -177,7 +177,75 @@ function stationArt(): Stroke[] {
   return S;
 }
 
-const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt, station: stationArt };
+function personAt(S: Stroke[], x: number, base: number, h: number, color = DARK, arm?: [number, number][]) {
+  const top = base - 230 * h;
+  S.push({ pts: circle(x, top + 26 * h, 24 * h + 4), color, w: 5 });
+  S.push({ pts: [[x, top + 52 * h], [x, base - 70 * h]], color, w: 5 });
+  S.push({ pts: [[x, base - 70 * h], [x - 20, base - 2]], color, w: 5 });
+  S.push({ pts: [[x, base - 70 * h], [x + 20, base - 2]], color, w: 5 });
+  if (arm) S.push({ pts: arm, color, w: 5 });
+}
+
+/** 함께: 정원사와 그의 사람이 꽃밭에서 손을 잡고 있다 */
+function togetherArt(): Stroke[] {
+  const S: Stroke[] = [];
+  S.push({ pts: [[-440, 190], [440, 190]], color: GRAY, w: 5 });
+  personAt(S, -60, 190, 1.1, DARK, [[-60, -20], [0, 20], [40, -10]]);
+  personAt(S, 60, 190, 1.0, DARK, [[60, -10], [40, -10]]);
+  // 서로의 가슴에 같은 색 꽃잎
+  S.push({ pts: circle(-60, -40, 8, 8), color: PETAL_COLORS[0], w: 4, fill: true });
+  S.push({ pts: circle(60, -30, 8, 8), color: PETAL_COLORS[0], w: 4, fill: true });
+  // 하트 모양 꽃밭
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * TAU;
+    const hx = 16 * Math.pow(Math.sin(a), 3);
+    const hy = -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a));
+    const x = hx * 9,
+      y = -170 + hy * 7;
+    S.push({ pts: circle(x, y, 9, 8), color: PETAL_COLORS[i % 7], w: 4, fill: true });
+  }
+  for (let i = 0; i < 10; i++) {
+    const x = -400 + i * 90 + (i > 4 ? 140 : 0);
+    if (Math.abs(x) < 140) continue;
+    S.push({ pts: [[x, 190], [x, 130]], color: STEM, w: 4 });
+    S.push({ pts: circle(x, 124, 12, 8), color: PETAL_COLORS[(i + 3) % 7], w: 4, fill: true });
+  }
+  return S;
+}
+
+/** 홀로: 시든 꽃밭, 비어 있는 자리, 마지막 한 송이를 든 정원사 */
+function aloneArt(): Stroke[] {
+  const S: Stroke[] = [];
+  S.push({ pts: [[-440, 190], [440, 190]], color: GRAY, w: 5 });
+  // 그 사람이 서 있던 자리: 점선 윤곽만
+  for (let k = 0; k < 14; k++) {
+    const a = (k / 14) * TAU;
+    S.push({ pts: [[60 + Math.cos(a) * 26, -12 + Math.sin(a) * 26], [60 + Math.cos(a + 0.2) * 26, -12 + Math.sin(a + 0.2) * 26]], color: '#9a9a96', w: 4 });
+  }
+  for (let y = 20; y < 180; y += 26) S.push({ pts: [[60, y], [60, y + 12]], color: '#9a9a96', w: 4 });
+  // 정원사: 무릎 꿇고 마지막 꽃을 든다
+  S.push({ pts: circle(-120, -10, 30), color: DARK, w: 5 });
+  S.push({ pts: [[-120, 20], [-110, 120]], color: DARK, w: 5 });
+  S.push({ pts: [[-110, 120], [-60, 130], [-60, 188]], color: DARK, w: 5 });
+  S.push({ pts: [[-110, 120], [-150, 188]], color: DARK, w: 5 });
+  S.push({ pts: [[-116, 50], [-60, 40], [-30, 20]], color: DARK, w: 5 });
+  S.push({ pts: [[-28, 20], [-24, -40]], color: STEM, w: 4 });
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * TAU;
+    S.push({ pts: circle(-24 + Math.cos(a) * 12, -52 + Math.sin(a) * 12, 8, 8), color: PETAL_COLORS[i], w: 4, fill: true });
+  }
+  S.push({ pts: [[-132, -6], [-134, 10]], color: '#8fb3e0', w: 3 });
+  S.push({ pts: [[-136, 18], [-137, 30]], color: '#8fb3e0', w: 3 });
+  // 시든 꽃밭
+  for (let i = 0; i < 9; i++) {
+    const x = 160 + i * 32;
+    S.push({ pts: [[x, 190], [x + 6, 150], [x + 16, 140]], color: '#a2a29e', w: 3 });
+    S.push({ pts: circle(x + 20, 140, 7, 6), color: '#a2a29e', w: 3 });
+  }
+  return S;
+}
+
+const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt, station: stationArt, together: togetherArt, alone: aloneArt };
 const cache = new Map<string, Stroke[]>();
 
 export function drawMemory(s: Screen, art: string, t: number, alpha: number) {

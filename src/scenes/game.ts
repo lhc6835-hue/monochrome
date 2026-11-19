@@ -11,7 +11,7 @@ import { drawIcon, type IconName } from '../gfx/icons';
 import { drawBlock, drawGroundSlab, drawCrack, INK } from '../gfx/ground';
 import { drawFlower, drawGlow, drawPetal, PETAL_COLORS } from '../gfx/flower';
 import { blankReach, drawBlankFigure, drawErasedRegion, PAPER } from '../gfx/blank';
-import { drawMemory } from '../gfx/memoryArt';
+import { drawMemory, memoryReadyAt } from '../gfx/memoryArt';
 import { plantLegs, rigidPose } from '../gfx/figure';
 import { Player, PH } from '../world/player';
 import { Box, Entity, Resident, type Prompt } from '../world/entities';
@@ -627,7 +627,7 @@ export class GameScene implements Scene, GameAPI {
     if (this.mode === 'paused') return;
     if (this.mode === 'memory') {
       this.memT += dt;
-      if (this.memT > 1.2 && (inp.pressed('confirm') || inp.pressed('interact') || inp.pressed('back') || inp.pressed('jump') || inp.anyPressed())) {
+      if (this.memT > memoryReadyAt(this.memArt) && (inp.pressed('confirm') || inp.pressed('interact') || inp.pressed('back') || inp.pressed('jump') || inp.anyPressed())) {
         this.mode = 'play';
         audio.muffle(0, 0.5);
         inp.consumeAll();
@@ -695,6 +695,16 @@ export class GameScene implements Scene, GameAPI {
     this.co.update(dt);
     this.updateBlank(dt);
 
+    // 가슴의 바랜 꽃잎: 여백이 가까이 오면 희미하게 붉어진다 (왜인지는 끝에서야 안다)
+    {
+      const pl = this.player;
+      let near = 0;
+      if (this.chase.active || this.blankCtl) {
+        const bx = this.blankCtl ? this.blankCtl.bx : this.chase.front;
+        near = 0.4 * clamp(1 - Math.abs(pl.x - bx) / 900) * (this.blankCtl ? clamp(this.blankCtl.alpha ?? 1) : 1);
+      }
+      pl.heartNear = damp(pl.heartNear, near, 3, dt);
+    }
     // 떨어짐
     if (this.player.y > this.level.killY && this.player.state !== 'dead') this.kill(this.level.fallCause ?? 'fall');
     // 익사
@@ -1128,9 +1138,16 @@ export class GameScene implements Scene, GameAPI {
     }
     // 엔티티 (뒤)
     for (const e of this.ents) e.drawBack(ctx, this);
+    if (this.level.drawMid) {
+      cam.apply(ctx, s, 1);
+      this.level.drawMid(ctx, this, v);
+      cam.apply(ctx, s, 1);
+    }
     // 꽃 빛
     this.player.drawGlow(ctx, this.petals);
 
+    // 여백이 인물들 뒤에 서 있어야 할 때 (진엔딩: 주인공이 그 앞에 선다)
+    if (this.blankCtl?.behind) this.drawBlank(v);
     // 인물 레이어
     const L = app.figLayer;
     s.clearLayer(L);
@@ -1154,7 +1171,7 @@ export class GameScene implements Scene, GameAPI {
     }
 
     // 여백
-    if (this.chase.active || this.grabT >= 0 || this.blankCtl || (this.mode === 'dying' && this.chase.front > 0 && this.chase.t > 0)) this.drawBlank(v);
+    if (!this.blankCtl?.behind && (this.chase.active || this.grabT >= 0 || this.blankCtl || (this.mode === 'dying' && this.chase.front > 0 && this.chase.t > 0))) this.drawBlank(v);
 
     cam.apply(ctx, s, 1);
     this.parts.render(ctx);
@@ -1740,7 +1757,7 @@ export class GameScene implements Scene, GameAPI {
       P.arms[1].b = lerp(0.25, 1.1, lift);
     } else if (this.blankCtl) {
       const k = this.blankCtl;
-      P.turn = 1;
+      P.turn = k.face ?? 1;
       bx = k.bx;
       by = k.by;
       P.lean = k.lean;
@@ -1752,6 +1769,24 @@ export class GameScene implements Scene, GameAPI {
         P.arms[1].b = k.hand2[1];
       }
       hand = k.hand;
+      // 술래 연출: 쫓던 자세(앞으로 뻗은 팔)가 아니라, 팔을 내린 채 서 있는 데서 시작한다
+      if (k.cover !== undefined) {
+        P.arms[0].a = 0.12;
+        P.arms[1].a = 0.08;
+        P.arms[0].b = P.arms[1].b = 0.15;
+      }
+      // 술래처럼 두 팔로 눈을 가린다
+      const cv = clamp(k.cover ?? 0);
+      if (cv > 0.001) {
+        const nI = (P.turn >= 0 ? 0 : 1) as 0 | 1;
+        const fI = (1 - nI) as 0 | 1;
+        P.arms[nI].a = lerp(P.arms[nI].a, 2.45, cv);
+        P.arms[nI].b = lerp(P.arms[nI].b, 2.35, cv);
+        P.arms[fI].a = lerp(P.arms[fI].a, 2.25, cv);
+        P.arms[fI].b = lerp(P.arms[fI].b, 2.45, cv);
+        P.headTilt += 0.3 * cv;
+        if (cv > 0.5) hand = null;
+      }
     }
     if (hand) B.hand = blankReach(P, 0, bx, by, S, hand[0], hand[1]);
     else {
@@ -1843,8 +1878,8 @@ export class GameScene implements Scene, GameAPI {
       cam.apply(ctx, s, 1);
       const cx = B.bx + B.scale * 0.03,
         cy = B.by - B.scale * 0.64;
-      drawGlow(ctx, cx, cy, B.scale * 0.5 * ctl.glow, PETAL_COLORS, ctl.glow);
-      drawPetal(ctx, cx, cy, B.scale * 0.05 * ctl.glow, PETAL_COLORS[(Math.floor(this.t * 2) % 7)], this.t * 0.4);
+      drawGlow(ctx, cx, cy, B.scale * 0.5 * ctl.glow, ctl.glowColor ? [ctl.glowColor] : PETAL_COLORS, ctl.glow);
+      drawPetal(ctx, cx, cy, B.scale * 0.05 * ctl.glow, ctl.glowColor ?? PETAL_COLORS[(Math.floor(this.t * 2) % 7)], this.t * 0.4);
     }
   }
 

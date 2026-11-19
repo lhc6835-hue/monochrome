@@ -6,7 +6,7 @@ import { ROLL_CONTACTS, ROLL_T, sampleRoll, RollPath } from './roll';
 import { audio } from '../core/audio';
 import { clamp, damp, ease, lerp, noise1 } from '../core/math';
 import { applyIdle, applyRunCycle, clonePose, drawFigure, lerpPose, plantLegs, reachIK, sideIK, rigidPose, defaultStyle, type Pose, type Joints } from '../gfx/figure';
-import { drawFlower, drawGlow, PETAL_COLORS } from '../gfx/flower';
+import { drawFlower, drawGlow, drawPetal, PETAL_COLORS } from '../gfx/flower';
 import { drawBlankFigure } from '../gfx/blank';
 
 export const PH = {
@@ -130,6 +130,11 @@ export class Player implements PlayerLike {
   preferFreeze = false;
   /** 연출: 픽토그램으로 굳어 있게 한다 */
   forceFreeze = false;
+  /** 가슴의 바랜 꽃잎 (0 = 거의 회색, 1 = 다시 빨갛게). 진엔딩에서 마지막 꽃잎이 되어 떠난다 */
+  heart = 0;
+  heartGone = false;
+  /** 여백이 가까이 있을 때의 떨림 (0..0.4) */
+  heartNear = 0;
   /** 꽃을 가슴 앞에 받쳐 든 정도 (0..1) */
   private holdK = 0;
   /** 연출: 몸이 하얗게 비어 연필 윤곽만 남는다 (0..1) */
@@ -1124,6 +1129,18 @@ export class Player implements PlayerLike {
             }
           : undefined,
     });
+    // 가슴의 바랜 꽃잎: 아주 오래전에 누군가와 나눠 가졌던 색. 게임 내내 거의 회색이다
+    if (!this.heartGone && this.joints) {
+      const j = this.joints;
+      const k = clamp(Math.max(this.heart, this.heartNear * (0.75 + 0.25 * Math.sin(g.t * 7))));
+      const a = st.alpha * (1 - this.hollow) * (0.55 + 0.45 * k);
+      if (a > 0.02) {
+        const cx = lerp(j.hip[0], j.head[0], 0.56) + this.facing * Math.abs(this.pose.turn) * 2;
+        const cy = lerp(j.hip[1], j.head[1], 0.56);
+        if (k > 0.05) drawGlow(ctx, cx, cy, 30 + 40 * k, [PETAL_COLORS[0]], 0.5 * k * a);
+        drawPetal(ctx, cx, cy, 6 + 1.5 * k, lerpColor('#8c8282', PETAL_COLORS[0], k), 0.3, a);
+      }
+    }
     // 하얗게 비어 가는 몸: 여백처럼 끓는 연필 윤곽
     if (this.hollow > 0.01) drawBlankFigure(ctx, this.pose, fx, fy, PH.SCALE, g.t, this.hollow);
     if (rolling) ctx.restore();

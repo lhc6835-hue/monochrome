@@ -37,8 +37,8 @@ function gardenArt(): Stroke[] {
   S.push({ pts: [[44, -40], [86, -70]], color: GRAY, w: 4 });
   // 물방울
   for (let i = 0; i < 4; i++) S.push({ pts: [[92 + i * 8, -50 + i * 22], [94 + i * 8, -40 + i * 22]], color: '#9fb8d8', w: 4 });
-  // 가슴에 꽃잎 (색)
-  S.push({ pts: circle(-121, -40, 9, 10), color: PETAL_COLORS[4], w: 5, fill: true });
+  // 가슴에 꽃잎 (빨강: 그 사람과 나눠 가진 색)
+  S.push({ pts: circle(-121, -40, 9, 10), color: PETAL_COLORS[0], w: 5, fill: true });
   // 작은 아이 (손잡기)
   S.push({ pts: circle(-250, 40, 26), color: DARK, w: 5 });
   S.push({ pts: [[-250, 66], [-250, 130]], color: DARK, w: 5 });
@@ -46,6 +46,8 @@ function gardenArt(): Stroke[] {
   S.push({ pts: [[-250, 130], [-228, 186]], color: DARK, w: 5 });
   S.push({ pts: [[-250, 86], [-200, 46], [-178, 40]], color: DARK, w: 5 });
   S.push({ pts: [[-250, 86], [-290, 120]], color: DARK, w: 5 });
+  // 아이의 가슴에도 같은 빨간 꽃잎
+  S.push({ pts: circle(-250, 92, 7, 8), color: PETAL_COLORS[0], w: 4, fill: true });
   // 꽃밭
   const fx = [60, 130, 200, 270, 340, 110, 240, 380];
   fx.forEach((x, i) => {
@@ -63,7 +65,12 @@ function gardenArt(): Stroke[] {
     const a = (i / 8) * TAU;
     S.push({ pts: [[330 + Math.cos(a) * 62, -170 + Math.sin(a) * 62], [330 + Math.cos(a) * 86, -170 + Math.sin(a) * 86]], color: GRAY, w: 4 });
   }
-  // 나중에 누군가 검게 덧칠한 꽃 하나
+  // 나중에 누군가 검게 덧칠한 꽃 하나 (덧칠 아래로 빨간 꽃잎이 비친다)
+  S.push({ pts: [[360, 188], [362, 130], [360, 96]], color: STEM, w: 4 });
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * TAU;
+    S.push({ pts: circle(360 + Math.cos(a) * 14, 90 + Math.sin(a) * 14, 11, 8), color: PETAL_COLORS[0], w: 5, fill: true });
+  }
   const sc: [number, number][] = [];
   for (let i = 0; i < 16; i++) sc.push([360 + (i % 2 ? 34 : -34) + hash1(i) * 10, 60 + i * 6]);
   S.push({ pts: sc, color: '#111', w: 9 });
@@ -223,6 +230,11 @@ function aloneArt(): Stroke[] {
     S.push({ pts: [[60 + Math.cos(a) * 26, -12 + Math.sin(a) * 26], [60 + Math.cos(a + 0.2) * 26, -12 + Math.sin(a + 0.2) * 26]], color: '#9a9a96', w: 4 });
   }
   for (let y = 20; y < 180; y += 26) S.push({ pts: [[60, y], [60, y + 12]], color: '#9a9a96', w: 4 });
+  // 빈자리의 가슴에, 바랜 빨간 점 하나
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * TAU;
+    S.push({ pts: [[60 + Math.cos(a) * 8, 52 + Math.sin(a) * 8], [60 + Math.cos(a + 0.4) * 8, 52 + Math.sin(a + 0.4) * 8]], color: '#d8a3a7', w: 3 });
+  }
   // 정원사: 무릎 꿇고 마지막 꽃을 든다
   S.push({ pts: circle(-120, -10, 30), color: DARK, w: 5 });
   S.push({ pts: [[-120, 20], [-110, 120]], color: DARK, w: 5 });
@@ -259,7 +271,7 @@ function hideArt(): Stroke[] {
   S.push({ pts: [[226, 110], [206, 188]], color: DARK, w: 6 });
   S.push({ pts: [[226, 110], [244, 188]], color: DARK, w: 6 });
   S.push({ pts: [[240, 10], [270, -10], [262, -40]], color: DARK, w: 6 });
-  S.push({ pts: circle(232, 30, 8, 8), color: PETAL_COLORS[2], w: 4, fill: true });
+  S.push({ pts: circle(232, 30, 8, 8), color: PETAL_COLORS[0], w: 4, fill: true });
   // 숫자 세는 말풍선 (회색 점 열 개)
   for (let i = 0; i < 10; i++) S.push({ pts: circle(120 - i * 22, -150 - Math.sin(i * 0.6) * 18, 5, 6), color: '#8d8d89', w: 3, fill: true });
   // 덤불 뒤 아이 둘
@@ -305,9 +317,37 @@ function firstEyeArt(): Stroke[] {
   S.push({ pts: [[60, 140], [62, 148]], color: '#c9c9c5', w: 2 });
   // 가슴에 남은 마지막 꽃잎 하나 (흐릿하게)
   S.push({ pts: circle(-44, 8, 7, 8), color: PETAL_COLORS[0], w: 3 });
+  // 틈 바로 옆에 굳어 선 사람 하나 — 가슴에 바랜 빨간 점
+  personAt(S, 150, 190, 0.95, '#6d6d6a');
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * TAU;
+    S.push({ pts: [[150 + Math.cos(a) * 7, 62 + Math.sin(a) * 7], [150 + Math.cos(a + 0.4) * 7, 62 + Math.sin(a + 0.4) * 7]], color: '#d8a3a7', w: 3 });
+  }
   // 멀리 굳은 사람들 (아이콘)
-  for (let i = 0; i < 4; i++) personAt(S, 220 + i * 52, 190, 0.45, '#8d8d89');
+  for (let i = 0; i < 4; i++) personAt(S, 280 + i * 46, 190, 0.45, '#8d8d89');
   return S;
+}
+
+/**
+ * 그림 아래의 손글씨 한 줄 (정원사의 목소리). 찾는 순서는 섞여 있지만, 모아 읽으면 한 사람의 이야기가 된다.
+ * 마지막 '첫 번째 눈'만 크레용이 아니라 연필로, 또박또박 쓰였다.
+ */
+const CAPTIONS: Record<string, string> = {
+  garden: '우리 정원.',
+  giving: '아픈 사람마다, 한 장씩.',
+  factory: '다들, 아프지 않은 쪽을 골랐다.',
+  station: '모두 떠났다. 나는 여기서 기다린다.',
+  together: '너와 나, 같은 색.',
+  alone: '네가 제일 먼저 굳었다.',
+  hide: '꼭꼭 숨어도, 내가 꼭 찾을게.',
+  firsteye: '이번엔, 네가 나를 찾아 줘.',
+};
+const CAP_START = 3.6;
+const CAP_CPS = 9;
+/** 이 그림을 닫아도 되는 때 (손글씨까지 다 쓰인 뒤) */
+export function memoryReadyAt(art: string) {
+  const n = [...(CAPTIONS[art] ?? '')].length;
+  return CAP_START + n / CAP_CPS + 0.4;
 }
 
 const ARTS: Record<string, () => Stroke[]> = { garden: gardenArt, giving: givingArt, factory: factoryArt, station: stationArt, together: togetherArt, alone: aloneArt, hide: hideArt, firsteye: firstEyeArt };
@@ -371,11 +411,42 @@ export function drawMemory(s: Screen, art: string, t: number, alpha: number) {
       }
     }
   });
+  // 손글씨: 한 글자씩 꾹꾹 눌러 쓴다 (크레용은 삐뚤빼뚤, 연필은 또박또박)
+  const cap = CAPTIONS[art];
+  if (cap && t > CAP_START) {
+    const pencil = art === 'firsteye';
+    const chars = [...cap];
+    const shown = (t - CAP_START) * CAP_CPS;
+    ctx.font = `${pencil ? 500 : 700} ${pencil ? 26 : 30}px "Nanum Pen Script", "Gaegu", "Nanum Brush Script", "Noto Serif KR", "AppleMyungjo", "Batang", serif`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    let x = -430;
+    const y = pencil ? 252 : 248;
+    chars.forEach((ch, i) => {
+      const k = clamp(shown - i);
+      const w = ctx.measureText(ch).width;
+      if (k > 0) {
+        ctx.save();
+        ctx.translate(x + w / 2, y + (pencil ? 0 : (hash1(i * 5.3) - 0.5) * 5));
+        ctx.rotate(pencil ? 0 : (hash1(i * 2.7) - 0.5) * 0.14);
+        ctx.globalAlpha = alpha * k * (pencil ? 0.7 : 0.9);
+        ctx.fillStyle = pencil ? '#6a6a66' : '#3b3a38';
+        ctx.fillText(ch, -w / 2, 0);
+        if (!pencil) {
+          ctx.globalAlpha = alpha * k * 0.3;
+          ctx.fillText(ch, -w / 2 + 1, 1);
+        }
+        ctx.restore();
+      }
+      x += w + (pencil ? 1 : 2);
+    });
+  }
   ctx.restore();
   // 닫기 안내
-  if (t > 3.8) {
+  const ready = memoryReadyAt(art);
+  if (t > ready) {
     ctx.save();
-    ctx.globalAlpha = alpha * clamp((t - 3.8) / 0.6) * 0.7;
+    ctx.globalAlpha = alpha * clamp((t - ready) / 0.6) * 0.7;
     ctx.fillStyle = '#bbb';
     const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     ctx.font = `400 ${Math.round(20 * s.ui)}px "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif`;

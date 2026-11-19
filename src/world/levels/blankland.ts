@@ -182,7 +182,21 @@ function* boss(g: GameAPI): Co {
     audio.play('sting4', { vol: 0.7 });
     if (gaze) gaze.active = true;
     g.hint('여백이 찾고 있다  ·  시선이 닿을 때 {down} 로 굳는다', '여백이 찾고 있다  ·  시선이 닿을 때 굳는다', 4);
-    yield () => p.x > 12600 || g.isDead();
+    // 여백이 찾는 동안, 낮게 흥얼거린다 — 숲의 술래가 부르던 그 가락
+    {
+      const RATES = [1.0, 1.0, 0.84, 1.0, 1.12, 1.0, 1.0, 0.84, 0.84, 0.75];
+      let k = 0,
+        w = 1.2;
+      while (p.x <= 12600 && !g.isDead()) {
+        w -= g.dt;
+        if (w <= 0) {
+          audio.play('bell1', { vol: 0.13, rate: RATES[k % RATES.length] * 0.59 });
+          w = k % RATES.length === 4 ? 1.1 : k % RATES.length === 9 ? 2.4 : 0.78;
+          k++;
+        }
+        yield;
+      }
+    }
     if (gaze) gaze.active = false;
     if (g.isDead()) return;
   }
@@ -398,8 +412,21 @@ const VIGNETTES: { id: string; icons: [IconName, number, number][] }[] = [
 const VX0 = 3900,
   VGAP = 470;
 
+/** 하얀 착지 자리에 놓인 것들 (연필 스케치): 누군가 쓰던 물뿌리개, 챙 넓은 모자, 마주 놓인 의자 둘 */
+const KEEPSAKES: [IconName, number, number, number, boolean][] = [
+  ['chair', 300, 0, 84, false],
+  ['chair', 372, 0, 84, true],
+  ['wateringCan', 470, 0, 56, false],
+  ['hat', 200, 0, 40, false],
+];
 function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1: number; y0: number; y1: number }) {
   const frame = Math.floor(g.t * 12);
+  if (v.x0 < 600 && v.x1 > 100) {
+    for (const [icon, x, y, h, flip] of KEEPSAKES) {
+      const jx = (hash1(frame * 3 + x) - 0.5) * 2;
+      drawIcon(ctx, icon, x + jx, y, h, { color: '#b9b8b3', flip });
+    }
+  }
   // C: 지나온 곳들 + 깨우지 못한 이웃들의 윤곽
   if (v.x1 > VX0 - 400 && v.x0 < VX0 + VGAP * VIGNETTES.length + 400) {
     const s = app.screen;

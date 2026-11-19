@@ -144,6 +144,8 @@ export interface LevelDef {
   moving?: boolean;
   /** 장식 뒤, 고체 앞에 그리는 구간 고유 그림 (선로 등) */
   drawBack?: (ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1: number; y0: number; y1: number }) => void;
+  /** 장식·고체·엔티티 뒤 그림 다음, 인물 앞에 그리는 구간 고유 그림 (지나간 사람의 흔적 등) */
+  drawMid?: (ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1: number; y0: number; y1: number }) => void;
   /** 바람/위험을 피할 수 있는 곳 (열차 칸 안 등) */
   sheltered?: (x: number, y: number) => boolean;
   /** 체크포인트에서 다시 시작할 때 */
@@ -236,6 +238,14 @@ export interface BlankCtl {
   alpha?: number;
   /** 크기 (기본 430) */
   scale?: number;
+  /** 바라보는 쪽 (1 = 오른쪽, -1 = 왼쪽, 사이 값은 돌아서는 중) */
+  face?: number;
+  /** 두 팔로 눈을 가린 정도 (술래처럼, 0..1) */
+  cover?: number;
+  /** 가슴에 차오르는 색 (없으면 무지개) */
+  glowColor?: string;
+  /** 인물들 뒤에 그린다 (주인공이 여백 앞에 서 있을 때) */
+  behind?: boolean;
 }
 export interface CamFocus {
   x: number;

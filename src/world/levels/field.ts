@@ -48,8 +48,11 @@ function groundY(x: number) {
 
 const decor: DecorDef[] = [
   { icon: 'house', x: 1180, y: -60, h: 190, color: '#2a2a28' },
-  { icon: 'bench', x: 1340, y: -120, h: 46, color: '#2a2a28' },
-  { icon: 'bench', x: 1420, y: PLATEAU, h: 46, color: '#2a2a28', flip: true },
+  // 마주 놓인 의자 둘 (그림 '함께'의 그 자리), 녹슨 물뿌리개, 걸어 둔 모자
+  { icon: 'chair', x: 1342, y: -120, h: 62, color: '#2a2a28' },
+  { icon: 'chair', x: 1430, y: PLATEAU, h: 62, color: '#2a2a28', flip: true },
+  { icon: 'wateringCan', x: 1262, y: -90, h: 40, color: '#2a2a28' },
+  { icon: 'hat', x: 1196, y: -60, h: 26, color: '#3a3a37' },
   { icon: 'tree2', x: 2900, y: PLATEAU, h: 360, color: '#2f2f2d' },
 ];
 
@@ -75,6 +78,10 @@ const st = {
   /** 진엔딩: 여백이 나타났다 / 마지막 꽃잎을 건넸다 */
   blankShown: false,
   given: false,
+  /** 진엔딩: 여백이 (숨지 않은) 주인공을 찾았다 / 술래처럼 세는 중인 글자 수 */
+  seen: false,
+  chanting: false,
+  chant: 0,
   credits: -1,
   title: 0,
 };
@@ -227,6 +234,8 @@ function* plant(g: GameAPI): Co {
     t = 0;
     while (t < 9) {
       t += g.dt;
+      // 경계 밖의 그 사람이 지워져 가는 동안, 가슴의 바랜 꽃잎이 이유도 모르게 붉게 떨린다
+      p.heart = 0.35 * Math.sin(Math.PI * clamp(t / 9)) * (0.8 + 0.2 * Math.sin(t * 6));
       // 꽃밭 쪽으로 손이 반쯤 들린다
       const k = ease.inOutSine(clamp(t / 3));
       ctl.hand = [BX + 120 + k * 120, lerp(-200, -470, k)];
@@ -253,8 +262,8 @@ function* plant(g: GameAPI): Co {
   S.camFocus = null;
   g.setControl(true);
   yield () => g.memories.has('m_firsteye') && (g as unknown as { mode: string }).mode === 'play';
-  // 경계에 여백이 서 있다
-  const ctl: BlankCtl = { bx: BX, by: 0, lean: 0.05, head: 0.15, hand: null, alpha: 0, scale: 360 };
+  // 경계에 여백이 서 있다 — 이쪽에 등을 돌리고, 두 팔로 눈을 가린 채. 숲의 술래처럼
+  const ctl: BlankCtl = { bx: BX, by: 0, lean: 0.2, head: 0.15, hand: null, alpha: 0, scale: 360, face: -1, cover: 1, behind: true };
   S.blankCtl = ctl;
   st.blankShown = true;
   audio.loop('heart', 'heart_slow', 0.5, 2, 'sfx');
@@ -262,6 +271,115 @@ function* plant(g: GameAPI): Co {
   while (t < 2) {
     t += g.dt;
     ctl.alpha = clamp(t / 2);
+    yield;
+  }
+  g.co.run(seekerBlank(g, ctl), 'seekBlank');
+}
+
+/** 무궁화 꽃이 피었습니다 — 숲의 술래와 같은 가락 */
+const CHANT = ['무', '궁', '화', '꽃', '이', '피', '었', '습', '니', '다'];
+const CHANT_RATES = [1.0, 1.0, 0.84, 1.0, 1.12, 1.0, 1.0, 0.84, 0.84, 0.75];
+const CHANT_TEMPO = [0.62, 0.62, 0.62, 0.62, 0.8, 0.62, 0.62, 0.62, 0.62, 0.9];
+/**
+ * 진엔딩: 여백은 아주 오래전의 술래다. 눈을 가리고 세다가 돌아본다.
+ * 게임 내내 배운 대로 굳어 있으면(숨으면) 아무도 찾지 못하고 다시 돌아서서 센다.
+ * 숨지 않고, 보이는 채로 있어야 — 비로소 찾는다.
+ */
+function* seekerBlank(g: GameAPI, ctl: BlankCtl): Co {
+  const p = g.player as unknown as Player;
+  let loops = 0;
+  const turn = function* (to: number): Co {
+    const from = ctl.face ?? 1;
+    let t = 0;
+    while (t < 0.75) {
+      t += g.dt;
+      const k = ease.inOutSine(clamp(t / 0.75));
+      ctl.face = lerp(from, to, k);
+      // 돌아볼 땐 팔을 먼저 내리고 돌고, 돌아설 땐 다 돌아선 뒤에 눈을 가린다
+      ctl.cover = to > 0 ? 1 - clamp(k * 2.2) : clamp((k - 0.55) / 0.45);
+      ctl.lean = to > 0 ? lerp(0.2, 0.03, k) : lerp(0.03, 0.2, k);
+      ctl.head = to > 0 ? lerp(0.15, -0.05, k) : lerp(-0.05, 0.15, k);
+      yield;
+    }
+    ctl.face = to;
+  };
+  // 너무 가까이 가 몸이 겹치지 않게 (여백 바로 앞에서 멈춘다)
+  const keepOut = () => {
+    if (p.x < BX + 150) {
+      p.body.x = BX + 150;
+      if (p.body.vx < 0) p.body.vx = 0;
+    }
+  };
+  g.co.run(
+    (function* () {
+      while (!st.given) {
+        keepOut();
+        yield;
+      }
+    })(),
+    'keepOut',
+  );
+  while (true) {
+    // 센다 (가까이 와서 등에 닿으면, 그 자리에서 돌아본다)
+    st.chanting = true;
+    st.chant = 0;
+    let touched = false;
+    for (let i = 0; i < CHANT.length; i++) {
+      let w = 0;
+      while (w < CHANT_TEMPO[i]) {
+        w += g.dt;
+        if (p.x < BX + 240) touched = true;
+        if (touched) break;
+        yield;
+      }
+      if (touched) break;
+      st.chant = i + 1;
+      audio.play('bell1', { vol: 0.3, rate: CHANT_RATES[i] * 1.18 });
+    }
+    st.chanting = false;
+    audio.play('click5', { vol: 0.45, rate: 0.5 });
+    yield* turn(1);
+    if (touched) break;
+    // 바라본다: 굳어 있으면 그저 아이콘일 뿐 — 아무도 없다
+    let t = 0,
+      seen = false;
+    while (t < 1.9) {
+      t += g.dt;
+      if (t > 0.2 && !p.frozen && !g.isDead()) {
+        seen = true;
+        break;
+      }
+      yield;
+    }
+    if (seen) break;
+    // 아무도 없다: 찾던 손이 반쯤 들렸다가, 내려간다
+    loops++;
+    t = 0;
+    while (t < 1.4) {
+      t += g.dt;
+      const k = Math.sin(Math.PI * clamp(t / 1.4));
+      ctl.hand = [BX + 150 + 90 * k, lerp(-150, -300, k)];
+      yield;
+    }
+    ctl.hand = null;
+    if (loops === 2) g.caption('숨지 않아도 돼.', 5, true);
+    yield* turn(-1);
+  }
+  // 찾았다
+  st.seen = true;
+  ctl.cover = 0;
+  ctl.face = 1;
+  g.caption('찾았다.', 4.5, true);
+  audio.play('chime', { vol: 0.5, rate: 0.9 });
+  audio.musicBox(12, { vol: 0.18, delay: 0.2, decay: 3 });
+  audio.musicBox(16, { vol: 0.18, delay: 0.55, decay: 3.4 });
+  // 이쪽으로 손을 조금 내민다
+  let t = 0;
+  while (t < 1.6) {
+    t += g.dt;
+    const k = ease.inOutSine(clamp(t / 1.6));
+    ctl.hand = [BX + 150 + 70 * k, lerp(-150, -240, k)];
+    ctl.head = lerp(-0.05, 0.12, k);
     yield;
   }
 }
@@ -277,12 +395,19 @@ function* giveLast(g: GameAPI): Co {
   const cam: CamFocus = { x: (p.x + BX) / 2, y: -360, zoom: 0.9, smooth: 1.2 };
   S.camFocus = cam;
   yield 0.4;
-  // 꽃잎이 날아간다
-  const color = g.petals[g.petals.length - 1] ?? PETAL_COLORS[0];
+  // 마지막 꽃잎은 꽃이 아니라 가슴에서 떠난다: 게임 내내 바래 있던 그 빨간 꽃잎이, 처음으로 제 색을 되찾으며
+  const color = PETAL_COLORS[0];
+  let t0 = 0;
+  while (t0 < 1.2) {
+    t0 += g.dt;
+    p.heart = ease.inOutSine(clamp(t0 / 1.1));
+    yield;
+  }
+  p.heartGone = true;
   g.petals.length = 0;
   audio.play('bell3', { vol: 0.5, rate: 1.2 });
   const j = p.joints;
-  const [hx, hy] = j ? j.hand[j.near] : [p.x, p.y - 80];
+  const [hx, hy] = j ? [lerp(j.hip[0], j.head[0], 0.56), lerp(j.hip[1], j.head[1], 0.56)] : [p.x, p.y - 80];
   const cx = BX + 360 * 0.03,
     cy = -360 * 0.64;
   let t = 0;
@@ -299,12 +424,17 @@ function* giveLast(g: GameAPI): Co {
   // 처음 돌아온 색의 다섯 음이, 여백의 가슴에서 다시 울린다
   audio.pad(chordFor(4), { vol: 0.08, attack: 1.4, hold: 2.2, release: 2.6 });
   MOTIF.forEach((n, i) => audio.musicBox(n + 12, { vol: 0.2, delay: 0.3 + i * 0.55 + (i === 4 ? 0.3 : 0), decay: i === 4 ? 4 : 2.6 }));
-  // 가슴에 색이 차오르고, 끓던 윤곽이 멈춘다
+  // 가슴에 같은 빨강이 차오르고, 끓던 윤곽이 멈춘다. 내민 손이 주인공의 손에 닿는다 (그림 '함께'처럼)
   ctl.still = true;
+  ctl.glowColor = color;
   t = 0;
+  const jh = p.joints ? p.joints.hand[p.joints.near] : [p.x - 30, p.y - 90];
+  const h0 = ctl.hand ?? [BX + 200, -240];
   while (t < 2.4) {
     t += g.dt;
     ctl.glow = ease.outCubic(clamp(t / 2.2));
+    const k = ease.inOutSine(clamp(t / 1.8));
+    ctl.hand = [lerp(h0[0], jh[0] - 6, k), lerp(h0[1], jh[1], k)];
     yield;
   }
   // 무릎을 꿇는다
@@ -370,7 +500,15 @@ function* giveLast(g: GameAPI): Co {
   g.petals.push(...PETAL_COLORS);
   g.parts.burst(p.x + 30, p.y - 90, PETAL_COLORS, 26, 200);
   audio.play('chime', { vol: 0.6, rate: 1.1 });
-  yield 1.0;
+  // 받은 꽃과 함께, 가슴에도 다시 색이 돋는다
+  p.heartGone = false;
+  p.heart = 0;
+  t = 0;
+  while (t < 1.0) {
+    t += g.dt;
+    p.heart = ease.outCubic(clamp(t / 1.0));
+    yield;
+  }
   // 손가락부터 관절이 풀리며 고개를 든다
   p.forceFreeze = false;
   audio.play('click1', { vol: 0.4, rate: 1.2 });
@@ -449,16 +587,6 @@ function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1
       ctx.globalAlpha = 1;
     }
   }
-  // 녹슨 물뿌리개
-  ctx.fillStyle = '#2a2a28';
-  ctx.fillRect(1260, -150, 46, 30);
-  ctx.beginPath();
-  ctx.moveTo(1306, -142);
-  ctx.lineTo(1340, -168);
-  ctx.lineTo(1344, -162);
-  ctx.lineTo(1306, -132);
-  ctx.closePath();
-  ctx.fill();
   // 피어난 꽃밭 위의 빛
   if (st.bloom > 0.01) drawGlow(ctx, CENTER, PLATEAU - 120, 900 * st.bloom, PETAL_COLORS, 0.35 * st.bloom);
 }
@@ -466,6 +594,23 @@ function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1
 /** 크레딧과 마지막 제목 (화면 좌표) */
 function drawOverlay(ctx: CanvasRenderingContext2D, _g: GameAPI, W: number, H: number) {
   const KR = '"Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
+  // 진엔딩: 술래가 된 여백이 세는 소리 (숲의 술래와 같은 모양으로)
+  if (st.blankShown && !st.seen && st.chant > 0) {
+    const u = Math.min(app.screen.ui, 1.6);
+    const fs = 50 * u;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `600 ${fs}px ${KR}`;
+    const gap = fs * 1.05;
+    for (let i = 0; i < CHANT.length; i++) {
+      const x = W / 2 + (i - (CHANT.length - 1) / 2) * gap + (i >= 5 ? gap * 0.35 : -gap * 0.35);
+      ctx.globalAlpha = i < st.chant ? (st.chanting ? 0.85 : 0.4) : 0.12;
+      ctx.fillStyle = '#1a1a19';
+      ctx.fillText(i < st.chant ? CHANT[i] : '·', x, H * 0.12);
+    }
+    ctx.restore();
+  }
   if (st.credits >= 0) {
     const lines = ['THE MONOCHROME', '', '이야기 · 기획 · 개발', '— 함께 만든 이들 —', '', '효과음', 'OpenGameArt.org 의 CC0 소리들', '(rubberduck, qubodup, ogrebane, bart 외)', '', '아이콘', 'Maki · Material Design Icons · Material Symbols', '', '그리고', '이 세계의 모든 이웃에게', '', '', '봐 주어서 고마워요'];
     const y0 = H + 40 - st.credits * 70;
@@ -521,16 +666,21 @@ export const field: LevelDef = {
     st.bloomWide = 0;
     st.blankShown = false;
     st.given = false;
+    st.seen = false;
+    st.chanting = false;
+    st.chant = 0;
     st.credits = -1;
     st.title = 0;
     (g.player as unknown as Player).hollow = 0;
+    (g.player as unknown as Player).heart = 0;
+    (g.player as unknown as Player).heartGone = false;
     (g.player as unknown as Player).forceFreeze = false;
     hideAll(g);
   },
   customPrompt: (g) => {
     const p = g.player;
     if (!st.planted && Math.abs(p.x - CENTER) < 120) return { text: '꽃 심기', x: CENTER, y: PLATEAU - 60, hold: 0.8, act: () => g.co.run(plant(g), 'plant') };
-    if (st.route === 'true' && st.blankShown && !st.given && p.x < BX + 170) return { text: '마지막 꽃잎 건네기', x: BX + 60, y: -140, hold: 1.2, act: () => g.co.run(giveLast(g), 'giveLast') };
+    if (st.route === 'true' && st.blankShown && st.seen && !st.given && p.x < BX + 170) return { text: '마지막 꽃잎 건네기', x: BX + 60, y: -140, hold: 1.2, act: () => g.co.run(giveLast(g), 'giveLast') };
     return null;
   },
   ambience: () => {

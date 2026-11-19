@@ -9,7 +9,7 @@
 import { app, type Scene } from '../app';
 import { audio } from '../core/audio';
 import { clamp, ease, lerp, mulberry32, TAU } from '../core/math';
-import { drawFigure, rigidPose, applyIdle, plantLegs, lerpPose, defaultStyle, type Pose, type Joints } from '../gfx/figure';
+import { drawFigure, rigidPose, applyIdle, applyRunCycle, plantLegs, lerpPose, defaultStyle, type Pose, type Joints } from '../gfx/figure';
 import { drawFlower, drawGlow, drawPetal, PETAL_COLORS } from '../gfx/flower';
 import { drawIcon, type IconName } from '../gfx/icons';
 import { drawCrack, INK } from '../gfx/ground';
@@ -321,8 +321,9 @@ const PAGES: Page[] = [
       c.fill();
       c.fillStyle = 'rgba(210,214,220,0.8)';
       for (let i = 0; i < 6; i++) c.fillRect(wx + 76 + i * 5, wy - 10 + i * 16, 2.5, 8);
-      heart(c, jg, PETAL_COLORS[3], 236);
-      heart(c, jk, JOY, 128);
+      // 정원사와 꽃잎을 쫓는 아이: 같은 빨간 꽃잎 (나중에야 그 뜻을 안다)
+      heart(c, jg, PETAL_COLORS[0], 236);
+      heart(c, jk, PETAL_COLORS[0], 128);
       heart(c, ja, PETAL_COLORS[0], 214);
       heart(c, jb, PETAL_COLORS[6], 200);
       flowerField(c, 23, 34, GY + 60, PH - 30, { scale: 1.3 });
@@ -636,6 +637,11 @@ const PAGES: Page[] = [
       for (let i = 0; i < 7; i++) drawCrack(c, 120 + i * 160, GY + 30 + (i % 3) * 40, 100 + (i % 2) * 60, i + 3);
       icons(c, [['lamp', 610, 300, '#141414']]);
       const js = [person(f, 430, GY, 158), person(f, 790, GY, 150), person(f, 300, GY, 104, undefined, { head: 1.3 })];
+      // 저 멀리, 하얗게 빈 누군가가 혼자 걸어간다 (아무도 보지 않는다)
+      person(f, 1040, GY - 4, 64, (p) => {
+        applyRunCycle(p, 1.2, 0.25, 1);
+        p.turn = 1;
+      }, { color: '#ecebe6' });
       composite(c, f);
       // 머리와 어깨에 내려앉은 먼지
       c.fillStyle = 'rgba(170,170,166,0.55)';
@@ -686,6 +692,20 @@ const PAGES: Page[] = [
       c.restore();
       drawCrack(c, 604, 640, 220, 4);
       drawCrack(c, 560, 680, 120, 9);
+      // 틈 곁의 흐린 연필 자국 몇 줄 (누군가 여기 무릎 꿇었던 것처럼)
+      c.save();
+      c.strokeStyle = 'rgba(215,215,210,0.38)';
+      c.lineWidth = 2;
+      const pr = mulberry32(707);
+      for (let i = 0; i < 9; i++) {
+        const x = 520 + pr() * 60,
+          y = 650 + pr() * 40;
+        c.beginPath();
+        c.moveTo(x, y);
+        c.lineTo(x + 14 + pr() * 18, y - 4 + pr() * 8);
+        c.stroke();
+      }
+      c.restore();
       rays(c, 604, 520, 420, 14, PETAL_COLORS, 0.18, 3);
       drawGlow(c, 604, 520, 220, PETAL_COLORS, 1.4);
       drawFlower(c, 604, 646, 64, PETAL_COLORS, { stem: 2.0, sway: 0.05 });
@@ -737,6 +757,8 @@ const PAGES: Page[] = [
         p.arms[1].a = 0.25;
       });
       composite(c, f);
+      // 가슴에 바랜 빨간 꽃잎 하나 (주인공 — 게임 내내 이 자국을 달고 다닌다)
+      drawPetal(c, lerp(j.hip[0], j.head[0], 0.56) + 4, lerp(j.hip[1], j.head[1], 0.56), 12, '#8c8282', 0.3, 0.85);
       const [hx, hy] = j.hand[0];
       // 손끝과 꽃 사이 아주 작은 틈
       const fx = hx + 18;

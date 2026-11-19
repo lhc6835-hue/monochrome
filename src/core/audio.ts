@@ -48,12 +48,20 @@ export class Audio {
   /** 사용자 제스처 안에서 호출 */
   unlock() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume();
+      if ((this.ctx.state as string) !== 'running' && !document.hidden) this.ctx.resume().catch(() => {});
       return;
     }
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const ctx = new AC();
     this.ctx = ctx;
+    // 폰에서 다른 앱으로 나갔다 오면 소리가 멈춘 채로 남는다 (iOS: interrupted).
+    // 다음 터치·키 입력 때 다시 켜고, 보이지 않는 동안에는 소리를 끈다
+    const wake = () => this.unlock();
+    for (const ev of ['pointerdown', 'touchend', 'keydown']) window.addEventListener(ev, wake, { passive: true });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) ctx.suspend().catch(() => {});
+      else ctx.resume().catch(() => {});
+    });
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14;
     comp.ratio.value = 3;

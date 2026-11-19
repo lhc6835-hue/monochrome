@@ -833,7 +833,12 @@ export class StoryScene implements Scene {
   private blipI = 0;
   private tapped = false;
   private motes: Mote[] = [];
-  private onTap = () => (this.tapped = true);
+  private tapSkip = false;
+  private onTap = (e: PointerEvent) => {
+    // 오른쪽 아래 '건너뛰기' 자리를 누르면 건너뛰기 (한 번 더 누르면 확정)
+    if (e.clientX > window.innerWidth * 0.72 && e.clientY > window.innerHeight * 0.84) this.tapSkip = true;
+    else this.tapped = true;
+  };
   private fig: CanvasRenderingContext2D;
 
   constructor() {
@@ -931,7 +936,9 @@ export class StoryScene implements Scene {
     }
     const advance = inp.pressed('confirm') || inp.pressed('interact') || inp.pressed('jump') || this.tapped;
     this.tapped = false;
-    if (inp.pressed('back') || inp.pressed('pause')) {
+    const skipTap = this.tapSkip;
+    this.tapSkip = false;
+    if (inp.pressed('back') || inp.pressed('pause') || skipTap) {
       if (this.skipArmed > 0) this.finish();
       else this.skipArmed = 2.5;
     }
@@ -1165,17 +1172,18 @@ export class StoryScene implements Scene {
       ctx.globalAlpha = 1;
     }
     // 쪽 표시 (점)
+    const u = Math.min(s.ui, 1.9);
     for (let i = 0; i < PAGES.length; i++) {
       ctx.fillStyle = i === this.page ? '#d6d6d2' : '#3a3a38';
       ctx.beginPath();
-      ctx.arc(s.W / 2 + (i - (PAGES.length - 1) / 2) * 16, s.H - 34, i === this.page ? 3.2 : 2.4, 0, TAU);
+      ctx.arc(s.W / 2 + (i - (PAGES.length - 1) / 2) * 16 * u, s.H - 34 * u, (i === this.page ? 3.2 : 2.4) * u, 0, TAU);
       ctx.fill();
     }
     // 건너뛰기 안내
-    ctx.font = `400 15px ${KR}`;
+    ctx.font = `400 ${15 * u}px ${KR}`;
     ctx.textAlign = 'right';
     ctx.fillStyle = this.skipArmed > 0 ? '#bdbdba' : '#4a4a48';
-    ctx.fillText(this.skipArmed > 0 ? 'Esc 를 한 번 더 누르면 건너뜁니다' : app.input.touchMode ? '화면을 눌러 넘기기' : 'Enter · Space 다음      Esc 건너뛰기', s.W - 40, s.H - 28);
+    ctx.fillText(this.skipArmed > 0 ? (app.input.touchMode ? '한 번 더 누르면 건너뜁니다' : 'Esc 를 한 번 더 누르면 건너뜁니다') : app.input.touchMode ? '화면을 눌러 넘기기      여기를 눌러 건너뛰기' : 'Enter · Space 다음      Esc 건너뛰기', s.W - 40 * u, s.H - 28 * u);
     app.post.apply(s, dt, 0.35, 0.06);
     if (this.fadeOut >= 0) app.post.fill(s, '#000', clamp(this.fadeOut / 1.4));
   }

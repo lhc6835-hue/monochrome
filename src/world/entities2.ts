@@ -19,7 +19,7 @@ export class Water extends Entity {
   readonly type = 'water';
   level: number;
   /** 큰 파도: 수면이 x 근처에서 amp 만큼 부풀어 오른 물마루 (그림만, 폭 w) */
-  surge: { x: number; amp: number; w: number } | null = null;
+  surge: { x: number; amp: number; w: number; lip?: number } | null = null;
   private moving = false;
   constructor(public def: Extract<EntityDef, { type: 'water' }>) {
     super(def.id);
@@ -76,29 +76,30 @@ export class Water extends Entity {
       else ctx.lineTo(Math.min(x, d.x1), y);
     }
     ctx.stroke();
-    // 물마루의 하얀 거품
-    if (sg && sg.amp > 30) {
-      ctx.strokeStyle = `rgba(244,244,240,${Math.min(0.95, sg.amp / 150)})`;
-      ctx.lineCap = 'round';
-      ctx.lineWidth = 7;
+    // 부서지는 물마루: 꼭대기가 앞으로 말려 내려온다 (물과 같은 색)
+    if (sg && (sg.lip ?? 0) > 0.05 && sg.amp > 60) {
+      const lip = sg.lip ?? 0;
+      const w = sg.w;
+      const topX = sg.x + w * 0.05;
+      const topY = surf(topX);
+      const reach = w * 0.42 * lip;
+      const drop = sg.amp * 0.34 * lip;
+      const wob = Math.sin(g.t * 5) * 4;
+      ctx.fillStyle = grad;
       ctx.beginPath();
-      let on = false;
-      for (let x = sg.x - sg.w * 1.1; x <= sg.x + sg.w * 1.6; x += 12) {
-        if (x < d.x0 || x > d.x1) continue;
-        const y = surf(x);
-        if (!on) {
-          ctx.moveTo(x, y);
-          on = true;
-        } else ctx.lineTo(x, y);
-      }
+      ctx.moveTo(topX + w * 0.28, surf(topX + w * 0.28));
+      ctx.quadraticCurveTo(topX - reach * 0.2, topY - sg.amp * 0.14 * lip + wob, topX - reach, topY + drop * 0.55);
+      ctx.quadraticCurveTo(topX - reach * 0.95, topY + drop, topX - reach * 0.55, topY + drop * 0.95);
+      ctx.quadraticCurveTo(topX - reach * 0.15, topY + drop * 0.7, topX - w * 0.02, surf(topX - w * 0.02) + 6);
+      ctx.closePath();
+      ctx.fill();
+      // 말린 물마루의 윗면도 수면처럼 옅게 빛난다
+      ctx.strokeStyle = 'rgba(200,200,196,0.55)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(topX + w * 0.28, surf(topX + w * 0.28));
+      ctx.quadraticCurveTo(topX - reach * 0.2, topY - sg.amp * 0.14 * lip + wob, topX - reach, topY + drop * 0.55);
       ctx.stroke();
-      ctx.fillStyle = 'rgba(244,244,240,0.8)';
-      for (let i = 0; i < 18; i++) {
-        const x = sg.x - sg.w * 0.4 + noise1(i * 7.1 + g.t * 3) * sg.w * 0.9;
-        ctx.beginPath();
-        ctx.arc(x, surf(x) - 6 - Math.abs(noise1(i * 3.3 + g.t * 5)) * 30, 3 + (i % 3) * 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
     }
     ctx.restore();
   }
@@ -107,10 +108,15 @@ export class Water extends Entity {
     let y = this.level + Math.sin(x * 0.03 + t * 2.2) * 2.5 + noise1(x * 0.01 + t * 0.6) * 2;
     const sg = this.surge;
     if (sg && sg.amp > 1) {
-      // 물마루: 앞(왼쪽)은 가파르고 뒤는 완만하게
+      // 물마루: 뒤는 길고 완만하게, 앞(왼쪽)은 가파르게 (부서질수록 더 가파르다)
       const u = (x - sg.x) / sg.w;
-      const bump = u < 0 ? Math.exp(-u * u * 2.2) : Math.exp(-u * u * 0.45);
-      y -= sg.amp * bump * (1 + 0.06 * Math.sin(x * 0.05 + t * 9));
+      const front = 2.4 + 3 * (sg.lip ?? 0);
+      const bump = u < 0 ? Math.exp(-u * u * front) : Math.exp(-u * u * 0.32);
+      // 뒤따라오는 작은 너울, 물마루 위의 잔물결
+      const swell2 = 0.22 * Math.exp(-(u - 2.6) * (u - 2.6) * 1.4);
+      y -= sg.amp * (bump + swell2) + sg.amp * 0.012 * Math.sin(x * 0.045 - t * 6) * bump;
+      // 큰 파도가 오는 동안 바다 전체가 조금 차오른다
+      y -= sg.amp * 0.07;
     }
     return y;
   }

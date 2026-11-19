@@ -149,7 +149,7 @@ const triggers: TriggerDef[] = [
 type WaveState = { phase: 'rest' | 'warn' | 'hit'; t: number; i: number };
 const waveFx = { warn: 0, hit: 0 };
 /** 폭풍의 큰 파도 물마루 (세계 좌표 x, 높이) */
-const surge = { x: 0, amp: 0 };
+const surge = { x: 0, v: 0, amp: 0, lip: 0, active: false, armed: false, splashed: false };
 
 function spray(g: GameAPI, amount: number, fromRight = true) {
   const p = g.player;
@@ -163,7 +163,6 @@ function waveStep(g: GameAPI, st: WaveState, pattern: number[], warn: number, hi
   if (st.phase === 'rest') {
     W.wind = 0;
     (g as unknown as { waveWarn: number }).waveWarn = 0;
-    if (sweeps) surge.amp = Math.max(0, surge.amp - g.dt * 260);
     if (st.t >= pattern[st.i % pattern.length]) {
       st.phase = 'warn';
       st.t = 0;
@@ -178,12 +177,6 @@ function waveStep(g: GameAPI, st: WaveState, pattern: number[], warn: number, hi
   } else if (st.phase === 'warn') {
     waveFx.warn = Math.max(0.01, st.t / warn);
     (g as unknown as { waveWarn: number }).waveWarn = 1;
-    if (sweeps) {
-      // 화면 오른쪽 바다가 점점 부풀어 오르며 다가온다
-      const k = clamp(st.t / warn);
-      surge.x = g.cam.x + (app.screen.W * 0.42) / g.cam.zoom - k * 260;
-      surge.amp = 40 + 190 * ease.inOutSine(k);
-    }
     if (Math.random() < 0.5) spray(g, 1);
     if (st.t >= warn) {
       st.phase = 'hit';
@@ -195,25 +188,9 @@ function waveStep(g: GameAPI, st: WaveState, pattern: number[], warn: number, hi
   } else {
     waveFx.warn = 0;
     waveFx.hit = 1 - st.t / hit;
-    if (sweeps) {
-      // 물마루가 방파제를 덮치며 화면을 가로지른다
-      const u = clamp(st.t / hit);
-      const right = g.cam.x + (app.screen.W * 0.42) / g.cam.zoom - 260;
-      const left = g.cam.x - (app.screen.W * 0.6) / g.cam.zoom;
-      surge.x = lerp(right, left, ease.inQuad(u) * 0.4 + u * 0.6);
-      surge.amp = 235 + 40 * Math.sin(u * Math.PI);
-    }
-    W.wind = -power * Math.min(1, st.t / 0.08, Math.max(0, hit - st.t) / 0.12);
-    spray(g, 3);
-    // 폭풍의 파도: 굳어서 버티지 않으면 방파제 밖으로 쓸려 간다
-    const p = g.player;
-    if (sweeps && st.t > 0.1 && !p.frozen && !g.isDead() && p.y > -60) {
-      p.body.vy = -520;
-      p.body.vx = -260;
-      g.parts.puff(p.x, p.y - 40, 18, 1.8);
-      audio.play('splash1', { vol: 0.9 });
-      g.kill('drown');
-    }
+    // (폭풍의 파도는 물마루가 실제로 지나갈 때 밀어낸다: stormSurge)
+    if (!sweeps) W.wind = -power * Math.min(1, st.t / 0.08, Math.max(0, hit - st.t) / 0.12);
+    if (!sweeps) spray(g, 3);
     if (st.t >= hit) {
       st.phase = 'rest';
       st.t = 0;
@@ -222,6 +199,76 @@ function waveStep(g: GameAPI, st: WaveState, pattern: number[], warn: number, hi
       waveFx.hit = 0;
     }
   }
+}
+
+/** 폭풍 물마루의 폭 */
+const SURGE_W = 360;
+/**
+ * 폭풍의 큰 파도: 화면 오른쪽 밖에서 바다가 부풀어 오르며 천천히 다가오다가(경고),
+ * 물마루가 앞으로 말리며 빠르게 방파제를 덮치고 지나간다. 위치·높이는 모두 부드럽게 따라간다.
+ * 물마루가 플레이어를 지나가는 순간 굳어 있지 않으면 쓸려 간다.
+ */
+function stormSurge(g: GameAPI, st: WaveState, warn: number) {
+  const dt = g.dt;
+  const p = g.player;
+  const z = g.cam.zoom;
+  if (st.phase === 'warn' && !surge.active) {
+    surge.active = true;
+    surge.armed = true;
+    surge.x = g.cam.x + (app.screen.W * 0.5) / z + SURGE_W * 0.6;
+    surge.v = -220;
+    surge.amp = 0;
+    surge.lip = 0;
+    surge.splashed = false;
+  }
+  if (!surge.active) return;
+  let ampT = 0,
+    vT = -1500,
+    lipT = 0;
+  if (st.phase === 'warn') {
+    const k = clamp(st.t / warn);
+    ampT = lerp(90, 330, ease.inOutSine(k));
+    vT = -260;
+    lipT = 0.15 * k;
+  } else if (st.phase === 'hit') {
+    ampT = 380;
+    vT = -1450;
+    lipT = 1;
+  } else {
+    // 지나간 뒤: 계속 왼쪽으로 밀려가며 잦아든다
+    ampT = surge.armed ? 360 : 0;
+    lipT = surge.armed ? 1 : 0;
+  }
+  surge.amp += (ampT - surge.amp) * (1 - Math.exp(-(ampT > surge.amp ? 3.2 : 1.6) * dt));
+  surge.v += (vT - surge.v) * (1 - Math.exp(-2.6 * dt));
+  surge.lip += (lipT - surge.lip) * (1 - Math.exp(-3 * dt));
+  surge.x += surge.v * dt;
+  // 물마루가 덮치는 동안: 물에 잠긴 채 굳어 있지 않으면 쓸려 간다 (공중에서는 굳을 수 없다)
+  const ws = g.entity<Water>('w_storm');
+  const over = surge.amp > 200 && surge.x - SURGE_W * 0.15 < p.x && surge.x + SURGE_W * 0.45 > p.x;
+  if (over && !surge.splashed) {
+    surge.splashed = true;
+    g.shake(0.3);
+    audio.play('splash2', { vol: 1, rate: 0.6 });
+    for (let i = 0; i < 26; i++) g.parts.add({ t: 'spark', x: p.x + rand(-80, 120), y: p.y - rand(40, 260), vx: rand(-700, -200), vy: rand(-500, 50), life: 0.9, size: rand(3, 7), color: '#9a9d9f', drag: 0.4, g: 1400 });
+  }
+  if (surge.armed && over && ws) {
+    const under = ws.surfaceY(p.x, g.t) < p.y - 30;
+    if (under && !p.frozen && !g.isDead()) {
+      surge.armed = false;
+      p.body.vy = -520;
+      p.body.vx = -260;
+      audio.play('splash1', { vol: 0.9 });
+      g.kill('drown');
+    }
+  }
+  if (surge.armed && surge.x + SURGE_W * 0.45 < p.x) surge.armed = false;
+  // 물마루가 밀고 지나가는 동안 몸이 밀린다 (굳으면 버틴다)
+  const near = Math.abs(surge.x - p.x) < SURGE_W * 0.6 && surge.amp > 200;
+  (g as unknown as { wind: number }).wind = near ? -300 : 0;
+  // 물마루가 지나갈 때까지는 '파도가 온다' 상태
+  if (surge.armed) (g as unknown as { waveWarn: number }).waveWarn = 1;
+  if (!surge.armed && surge.amp < 2) surge.active = false;
 }
 
 function* seaWeather(g: GameAPI): Co {
@@ -245,7 +292,8 @@ function* seaWeather(g: GameAPI): Co {
     else if (x < 900) waveStep(g, shore, [3.0, 3.6], 0.6, 0.7, 210);
     else if (x > 4560 && x < 7000) waveStep(g, harbor, [3.2, 3.2, 2.4, 4.0], 0.8, 0.7, 430);
     else if (x > BREAK + 200 && g.chaseActive() && !(g as unknown as { chase: { cine: boolean } }).chase.cine) {
-      waveStep(g, storm, [3.0, 3.4, 2.6, 3.6], 0.95, 0.5, 300, true);
+      waveStep(g, storm, [3.0, 3.4, 2.6, 3.6], 0.95, 0.9, 300, true);
+      stormSurge(g, storm, 0.95);
       // 번개
       bolt -= g.dt;
       if (bolt <= 0) {
@@ -260,8 +308,12 @@ function* seaWeather(g: GameAPI): Co {
     // 폭풍 물마루를 바다에 그린다
     const ws = g.entity<Water>('w_storm');
     if (ws) {
-      if (!(x > BREAK + 200 && g.chaseActive()) || g.isDead()) surge.amp = Math.max(0, surge.amp - g.dt * 400);
-      ws.surge = surge.amp > 1 ? { x: surge.x, amp: surge.amp, w: 300 } : null;
+      if (!(x > BREAK + 200 && g.chaseActive()) || g.isDead()) {
+        surge.amp = Math.max(0, surge.amp - g.dt * 400);
+        surge.armed = false;
+        if (surge.amp <= 1) surge.active = false;
+      }
+      ws.surge = surge.active && surge.amp > 1 ? { x: surge.x, amp: surge.amp, w: SURGE_W, lip: surge.lip } : null;
     }
     // 비
     if (x > BREAK) {
@@ -405,7 +457,7 @@ function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1
   }
   // 큰 파도: 오른쪽에서 부풀어 오르는 물마루
   const k = Math.max(waveFx.warn * 0.7, waveFx.hit);
-  if (k > 0.01) {
+  if (k > 0.01 && g.player.x < BREAK) {
     const cx = g.cam.x + 900 / g.cam.zoom - k * 500;
     ctx.save();
     ctx.globalAlpha = 0.55 * k;
@@ -434,44 +486,8 @@ function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1
 
 /** 폭풍의 큰 파도가 부풀어 오를 때: 화면 위에 '굳어라' (술래 놀이와 같은 신호) */
 function drawOverlay(ctx: CanvasRenderingContext2D, g: GameAPI, W: number, H: number) {
-  // 큰 파도의 물마루: 폭풍의 어둠 속에서도 보이도록 흰 거품 선을 어둠 위에 그린다
-  const ws = g.entity<Water>('w_storm');
-  if (ws && ws.surge && ws.surge.amp > 20) {
-    const sg = ws.surge;
-    const s = app.screen;
-    const a = clamp((sg.amp - 20) / 120);
-    ctx.save();
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    // 거품 선 (물마루 꼭대기를 따라)
-    for (const [lw, col] of [
-      [14, `rgba(236,236,232,${0.28 * a})`],
-      [5, `rgba(246,246,242,${0.9 * a})`],
-    ] as const) {
-      ctx.lineWidth = lw * s.ui;
-      ctx.strokeStyle = col;
-      ctx.beginPath();
-      let first = true;
-      for (let x = sg.x - sg.w * 1.2; x <= sg.x + sg.w * 2.2; x += 14) {
-        const [sx, sy] = g.cam.toScreen(s, x, ws.surfaceY(x, g.t));
-        if (first) ctx.moveTo(sx, sy);
-        else ctx.lineTo(sx, sy);
-        first = false;
-      }
-      ctx.stroke();
-    }
-    // 부서지는 물보라
-    ctx.fillStyle = `rgba(246,246,242,${0.8 * a})`;
-    for (let i = 0; i < 26; i++) {
-      const x = sg.x - sg.w * 0.5 + (((i * 37.3 + g.t * 260) % (sg.w * 1.3)) - sg.w * 0.2);
-      const [sx, sy] = g.cam.toScreen(s, x, ws.surfaceY(x, g.t) - 8 - ((i * 13) % 40));
-      ctx.beginPath();
-      ctx.arc(sx, sy, (2 + (i % 3) * 1.5) * s.ui, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-  const k = Math.max(waveFx.warn > 0 ? clamp(waveFx.warn * 3) : 0, waveFx.hit);
+  // 물마루가 플레이어를 지나갈 때까지
+  const k = surge.active && surge.armed ? clamp(surge.amp / 120) : 0;
   if (k <= 0.01 || !(g.player.x > BREAK + 200)) return;
   const u = app.screen.ui;
   ctx.save();

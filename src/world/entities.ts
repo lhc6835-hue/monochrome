@@ -256,6 +256,8 @@ export class Resident extends Entity {
   state: RState = 'frozen';
   iris: string | null = null;
   pose: Pose = rigidPose();
+  /** 연속으로 도는 정도 (그릴 때는 정면/옆모습으로 끊는다) */
+  private turnC = 0;
   private wakeT = 0;
   facing = 1;
   private phase = 0;
@@ -421,7 +423,8 @@ export class Resident extends Entity {
       out.eye = ease.outBack(clamp((u - 0.9) / 0.5));
       out.lookX = Math.sin(u * 3) * 0.6 * clamp((u - 1.2) / 0.3);
       const face = clamp((u - 1.6) / 0.5);
-      out.turn = lerp(0, this.facing * 0.5, face);
+      out.turn = lerp(0, this.facing, face);
+      this.turnC = out.turn;
       out.headX += Math.exp(-u * 5) * Math.sin(u * 70) * 0.01;
       return out;
     }
@@ -442,8 +445,8 @@ export class Resident extends Entity {
       out.arms[1].a -= Math.sin(ph) * 0.3;
       return out;
     }
-    const turnT = sp > 30 ? this.facing : this.facing * 0.55;
-    out.turn = damp(p.turn, turnT, 10, g.dt);
+    this.turnC = damp(this.turnC, this.facing, 10, g.dt);
+    out.turn = this.turnC;
     if (sp > 30) {
       applyRunCycle(out, this.phase, clamp(sp / 330), this.facing);
     } else {
@@ -463,6 +466,8 @@ export class Resident extends Entity {
   drawFig(ctx: CanvasRenderingContext2D, g: GameAPI) {
     if (this.state === 'gone') return;
     this.pose = this.computePose(g);
+    // 아이콘은 정면 아니면 옆모습뿐 (비스듬한 각도에선 어깨·골반 모서리가 튀어나온다)
+    this.pose.turn = Math.abs(this.pose.turn) < 0.4 ? 0 : Math.sign(this.pose.turn);
     const st = defaultStyle();
     st.headScale = this.headScale;
     st.alpha = this.alpha;

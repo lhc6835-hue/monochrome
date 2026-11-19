@@ -181,6 +181,8 @@ export function drawFigure(
   style: FigureStyle = defaultStyle(),
   extras: DrawExtras = {},
 ): Joints {
+  // 아이콘은 정면 아니면 옆모습뿐: 비스듬한 각도(3/4)에선 어깨·골반 모서리가 몸 밖으로 튀어나온다
+  if (pose.turn !== 0 && Math.abs(pose.turn) !== 1) pose = { ...pose, turn: Math.abs(pose.turn) < 0.4 ? 0 : Math.sign(pose.turn) };
   const tt = clamp(Math.abs(pose.turn));
   const f = pose.turn >= 0 ? 1 : -1;
   const th = pose.lean * f;

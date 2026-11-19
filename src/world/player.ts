@@ -29,6 +29,8 @@ export const PH = {
 /** 사다리 가로대 간격, 한 칸 오르는 시간 */
 export const RUNG = 34;
 const CLIMB_STEP = 0.19;
+/** 달리다 멈출 때 다리를 모으는 시간 */
+const STOP_T = 0.2;
 /** 꼭대기를 넘어가는 시간, 사다리 위에서 몸이 사다리 뒤로 물러난 거리 */
 const CLIMB_EXIT_T = 0.62;
 const CLIMB_BACK = 30;
@@ -103,6 +105,11 @@ export class Player implements PlayerLike {
   private lastSolids: Solid[] = [];
   private fallStartY = 0;
   private idleT = 0;
+  private lastSp = 0;
+  /** 연속으로 도는 정도 (그릴 때는 정면/옆모습으로 끊어서 쓴다) */
+  private turnC = 1;
+  private stopFrom: Pose | null = null;
+  private stopT = 0;
   private stepI = 0;
   pushing = 0;
   grabbing: Box | null = null;
@@ -666,7 +673,11 @@ export class Player implements PlayerLike {
     const P = rigidPose();
     const prev = this.pose;
     const sp = Math.abs(b.vx);
-    P.turn = damp(prev.turn, this.facing, 16, dt);
+    // 돌아서기: 아이콘은 정면 아니면 옆모습뿐. 움직이는 중에는 바로 뒤집고,
+    // 서서 돌 때만 정면을 아주 잠깐 거친다 (비스듬한 3/4 모습에선 어깨·골반이 튀어나와 보인다)
+    const moving = !b.onGround || sp > 60;
+    this.turnC = moving ? this.facing : damp(this.turnC, this.facing, 16, dt);
+    P.turn = Math.abs(this.turnC) < 0.4 ? 0 : Math.sign(this.turnC);
     P.lookX = damp(prev.lookX, this.facing * 0.35, 6, dt);
     // 발걸음
     const ph0 = this.phase;
@@ -771,6 +782,21 @@ export class Player implements PlayerLike {
       }
     } else {
       applyIdle(P, g.t, this.facing, 1);
+      // 달리다 멈추면: 벌어진 다리를 한 박자에 걸쳐 모으고, 몸이 살짝 뒤로 버텼다가 선다
+      if (this.lastSp > 150 && b.onGround && !this.grabbing) {
+        this.stopFrom = clonePose(prev);
+        this.stopT = 0;
+        this.lastSp = 0;
+      }
+      if (this.stopFrom && this.stopT < STOP_T) {
+        this.stopT += dt;
+        const k = ease.outCubic(clamp(this.stopT / STOP_T));
+        const idle = clonePose(P);
+        lerpPose(this.stopFrom, idle, k, P);
+        P.turn = idle.turn;
+        P.lean -= 0.1 * Math.sin(Math.PI * k);
+        P.crouch += 0.02 * Math.sin(Math.PI * k);
+      } else this.stopFrom = null;
       if (this.grabbing) {
         const near = this.facing > 0 ? 0 : 1;
         P.arms[near].a = P.arms[1 - near].a = 1.35;
@@ -780,6 +806,8 @@ export class Player implements PlayerLike {
       // 오래 서 있으면 두리번
       if (this.idleT > 4) P.lookX = noise1(this.idleT * 0.5) * 0.9;
     }
+    // 최근 달리던 속도 (멈출 때 한 번만 쓴다)
+    this.lastSp = b.onGround ? Math.max(sp, this.lastSp - dt * 900) : 0;
     // 착지: 무릎이 굽었다가 천천히 펴진다 (발은 땅에 붙어 있다)
     if (key === 'ground' && this.landImpact > 0 && this.landT < 1) {
       const t = this.landT;
@@ -815,7 +843,7 @@ export class Player implements PlayerLike {
       R.eye = 0;
       const k = ease.inOutCubic(this.freezeAmt);
       lerpPose(P, R, k, P);
-      P.turn = lerp(P.turn, 0, k);
+      P.turn = k > 0.45 ? 0 : P.turn;
       P.eye = 1 - k;
       if (this.freezeAmt < 1 && this.freezeAmt > 0.2) P.headX += Math.sin(g.t * 80) * 0.004;
     }
@@ -848,10 +876,12 @@ export class Player implements PlayerLike {
     // (구르기·사다리·턱 오르기·상자·꽃잎 건네기·헤엄·굳기 중에는 손을 풀었다가, 끝나면 다시 든다)
     const holdOk =
       g.petals.length > 0 && !this.hideFlower && (this.state === 'normal' || this.state === 'scripted') && !this.swimming && !this.grabbing && !this.pushing && key !== 'climb' && key !== 'mantle' && key !== 'slide';
-    this.holdK = damp(this.holdK, holdOk ? 1 : 0, 9, dt);
+    // 정면(굳기 등)으로 돌아서면 꽃을 든 팔을 바로 내린다: 정면에서 가슴 앞으로 접힌 팔은 아이콘 같지 않다
+    const tt = clamp(Math.abs(P.turn));
+    const sideK = clamp((tt - 0.45) / 0.4);
+    this.holdK = damp(this.holdK, holdOk ? sideK : 0, holdOk ? 9 : this.state === 'freeze' ? 28 : 12, dt);
     if (this.holdK > 0.01) {
       const h = this.facing > 0 ? 0 : 1;
-      const tt = clamp(Math.abs(P.turn));
       const run = clamp(sp / PH.RUN);
       // 걸음마다 아주 조금 오르내린다
       const bob = Math.sin(this.phase * 2) * 0.07 * run;
@@ -861,6 +891,8 @@ export class Player implements PlayerLike {
       P.arms[h].a = lerp(P.arms[h].a, ha, this.holdK);
       P.arms[h].b = lerp(P.arms[h].b, hb, this.holdK);
     }
+    // 그릴 때는 정면 아니면 옆모습으로 (블렌드 중에도 비스듬한 각도가 나오지 않게)
+    P.turn = Math.abs(P.turn) < 0.4 ? 0 : Math.sign(P.turn);
     this.pose = P;
   }
 
@@ -1040,7 +1072,7 @@ export class Player implements PlayerLike {
         st.alpha = 1 - clamp((this.deathT - 0.5) / 0.6);
       }
     }
-    const hide = this.freezeAmt > 0.5 || this.hideFlower || this.state === 'climb';
+    const hide = this.freezeAmt > 0.15 || this.hideFlower || this.state === 'climb';
     const fsize = 22;
     // 구르기: 엉덩이를 축으로 몸을 돌리고, 가장 낮은 점(손/어깨/등/발)을 바닥에 붙인다
     const rk = this.rollK,

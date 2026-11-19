@@ -19,6 +19,8 @@ import { audio } from '../../core/audio';
 import { PETAL_COLORS } from '../../gfx/flower';
 import { PAPER } from '../../gfx/blank';
 import { clamp, ease, lerp, rand } from '../../core/math';
+import { app } from '../../app';
+import type { Water } from '../entities2';
 
 const floor = (x0: number, x1: number, y = 0): SolidDef => ({ x: x0, y, w: x1 - x0, h: 3000, look: 'ground' });
 const wall = (x: number, y0: number, y1: number, w = 30): SolidDef => ({ x, y: y0, w, h: y1 - y0, look: 'brick' });
@@ -115,11 +117,11 @@ const entities: EntityDef[] = [
   { type: 'lever', id: 's_lamp', x: TOWER.x1 - 62, y: -1300, signal: 'lamp' },
   { type: 'beacon', id: 'beacon', x: 7450, y: TOWER.top - 60, mid: 1.05, amp: 0.34, period: 9.5, len: 2300, half: 0.15, signal: 'lamp', sweep: [6.5, 2.2] },
   { type: 'water', id: 'w_fog', x0: TOWER.x1 + 200, x1: BREAK, floor: 700, low: 60 },
-  { type: 'litplank', id: 'fp1', x: 7760, y: -360, w: 150, by: 'beacon', hold: 1.4 },
-  { type: 'litplank', id: 'fp2', x: 7985, y: -320, w: 150, by: 'beacon', hold: 1.4 },
-  { type: 'litplank', id: 'fp3', x: 8210, y: -270, w: 150, by: 'beacon', hold: 1.4 },
-  { type: 'litplank', id: 'fp4', x: 8435, y: -220, w: 150, by: 'beacon', hold: 1.4 },
-  { type: 'litplank', id: 'fp5', x: 8650, y: -170, w: 150, by: 'beacon', hold: 1.4 },
+  { type: 'litplank', id: 'fp1', x: 7760, y: -360, w: 150, by: 'beacon', hold: 0.5 },
+  { type: 'litplank', id: 'fp2', x: 7985, y: -320, w: 150, by: 'beacon', hold: 0.5 },
+  { type: 'litplank', id: 'fp3', x: 8210, y: -270, w: 150, by: 'beacon', hold: 0.5 },
+  { type: 'litplank', id: 'fp4', x: 8435, y: -220, w: 150, by: 'beacon', hold: 0.5 },
+  { type: 'litplank', id: 'fp5', x: 8650, y: -170, w: 150, by: 'beacon', hold: 0.5 },
   // E
   { type: 'water', id: 'w_storm', x0: BREAK, x1: END + 300, floor: 700, low: 120 },
   { type: 'petal', id: 's_p_rail', x: 10200, y: -250, color: PETAL_COLORS[0] },
@@ -146,6 +148,8 @@ const triggers: TriggerDef[] = [
 // ------------------------------------------------------------------
 type WaveState = { phase: 'rest' | 'warn' | 'hit'; t: number; i: number };
 const waveFx = { warn: 0, hit: 0 };
+/** 폭풍의 큰 파도 물마루 (세계 좌표 x, 높이) */
+const surge = { x: 0, amp: 0 };
 
 function spray(g: GameAPI, amount: number, fromRight = true) {
   const p = g.player;
@@ -159,15 +163,27 @@ function waveStep(g: GameAPI, st: WaveState, pattern: number[], warn: number, hi
   if (st.phase === 'rest') {
     W.wind = 0;
     (g as unknown as { waveWarn: number }).waveWarn = 0;
+    if (sweeps) surge.amp = Math.max(0, surge.amp - g.dt * 260);
     if (st.t >= pattern[st.i % pattern.length]) {
       st.phase = 'warn';
       st.t = 0;
       audio.play('amb_rumble', { vol: 0.55, rate: 1.4 });
       audio.play('whoosh', { vol: 0.35, rate: 0.4 });
+      // 폭풍: 번개가 번쩍이며 부풀어 오르는 파도를 비춘다
+      if (sweeps) {
+        (g as unknown as { flash: number }).flash = 0.8;
+        audio.play('slam', { vol: 0.55, rate: 0.4 });
+      }
     }
   } else if (st.phase === 'warn') {
     waveFx.warn = Math.max(0.01, st.t / warn);
     (g as unknown as { waveWarn: number }).waveWarn = 1;
+    if (sweeps) {
+      // 화면 오른쪽 바다가 점점 부풀어 오르며 다가온다
+      const k = clamp(st.t / warn);
+      surge.x = g.cam.x + (app.screen.W * 0.42) / g.cam.zoom - k * 260;
+      surge.amp = 40 + 190 * ease.inOutSine(k);
+    }
     if (Math.random() < 0.5) spray(g, 1);
     if (st.t >= warn) {
       st.phase = 'hit';
@@ -179,6 +195,14 @@ function waveStep(g: GameAPI, st: WaveState, pattern: number[], warn: number, hi
   } else {
     waveFx.warn = 0;
     waveFx.hit = 1 - st.t / hit;
+    if (sweeps) {
+      // 물마루가 방파제를 덮치며 화면을 가로지른다
+      const u = clamp(st.t / hit);
+      const right = g.cam.x + (app.screen.W * 0.42) / g.cam.zoom - 260;
+      const left = g.cam.x - (app.screen.W * 0.6) / g.cam.zoom;
+      surge.x = lerp(right, left, ease.inQuad(u) * 0.4 + u * 0.6);
+      surge.amp = 235 + 40 * Math.sin(u * Math.PI);
+    }
     W.wind = -power * Math.min(1, st.t / 0.08, Math.max(0, hit - st.t) / 0.12);
     spray(g, 3);
     // 폭풍의 파도: 굳어서 버티지 않으면 방파제 밖으로 쓸려 간다
@@ -221,7 +245,7 @@ function* seaWeather(g: GameAPI): Co {
     else if (x < 900) waveStep(g, shore, [3.0, 3.6], 0.6, 0.7, 210);
     else if (x > 4560 && x < 7000) waveStep(g, harbor, [3.2, 3.2, 2.4, 4.0], 0.8, 0.7, 430);
     else if (x > BREAK + 200 && g.chaseActive() && !(g as unknown as { chase: { cine: boolean } }).chase.cine) {
-      waveStep(g, storm, [3.0, 3.4, 2.6, 3.6], 0.75, 0.5, 300, true);
+      waveStep(g, storm, [3.0, 3.4, 2.6, 3.6], 0.95, 0.5, 300, true);
       // 번개
       bolt -= g.dt;
       if (bolt <= 0) {
@@ -231,6 +255,14 @@ function* seaWeather(g: GameAPI): Co {
         audio.play('amb_rumble', { vol: 0.8, rate: 0.7, delay: 0.25 });
       }
     } else S.wind = 0;
+    // 큰 파도가 오는 곳(항구·폭풍 방파제)에서는 달리다 ↓ 를 눌러도 구르지 않고 굳는다
+    (p as unknown as { preferFreeze: boolean }).preferFreeze = (x > 4560 && x < 7000) || (x > BREAK + 200 && g.chaseActive());
+    // 폭풍 물마루를 바다에 그린다
+    const ws = g.entity<Water>('w_storm');
+    if (ws) {
+      if (!(x > BREAK + 200 && g.chaseActive()) || g.isDead()) surge.amp = Math.max(0, surge.amp - g.dt * 400);
+      ws.surge = surge.amp > 1 ? { x: surge.x, amp: surge.amp, w: 300 } : null;
+    }
     // 비
     if (x > BREAK) {
       for (let i = 0; i < 4; i++) g.parts.add({ t: 'spark', x: g.cam.x + rand(-1300, 1300), y: g.cam.y - 700, vx: -380, vy: 1700, life: 0.75, size: 2, color: '#d6d6d2', drag: 0 });
@@ -400,6 +432,66 @@ function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1
   }
 }
 
+/** 폭풍의 큰 파도가 부풀어 오를 때: 화면 위에 '굳어라' (술래 놀이와 같은 신호) */
+function drawOverlay(ctx: CanvasRenderingContext2D, g: GameAPI, W: number, H: number) {
+  // 큰 파도의 물마루: 폭풍의 어둠 속에서도 보이도록 흰 거품 선을 어둠 위에 그린다
+  const ws = g.entity<Water>('w_storm');
+  if (ws && ws.surge && ws.surge.amp > 20) {
+    const sg = ws.surge;
+    const s = app.screen;
+    const a = clamp((sg.amp - 20) / 120);
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    // 거품 선 (물마루 꼭대기를 따라)
+    for (const [lw, col] of [
+      [14, `rgba(236,236,232,${0.28 * a})`],
+      [5, `rgba(246,246,242,${0.9 * a})`],
+    ] as const) {
+      ctx.lineWidth = lw * s.ui;
+      ctx.strokeStyle = col;
+      ctx.beginPath();
+      let first = true;
+      for (let x = sg.x - sg.w * 1.2; x <= sg.x + sg.w * 2.2; x += 14) {
+        const [sx, sy] = g.cam.toScreen(s, x, ws.surfaceY(x, g.t));
+        if (first) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+        first = false;
+      }
+      ctx.stroke();
+    }
+    // 부서지는 물보라
+    ctx.fillStyle = `rgba(246,246,242,${0.8 * a})`;
+    for (let i = 0; i < 26; i++) {
+      const x = sg.x - sg.w * 0.5 + (((i * 37.3 + g.t * 260) % (sg.w * 1.3)) - sg.w * 0.2);
+      const [sx, sy] = g.cam.toScreen(s, x, ws.surfaceY(x, g.t) - 8 - ((i * 13) % 40));
+      ctx.beginPath();
+      ctx.arc(sx, sy, (2 + (i % 3) * 1.5) * s.ui, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  const k = Math.max(waveFx.warn > 0 ? clamp(waveFx.warn * 3) : 0, waveFx.hit);
+  if (k <= 0.01 || !(g.player.x > BREAK + 200)) return;
+  const u = app.screen.ui;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.globalAlpha = k;
+  ctx.font = `700 ${64 * Math.min(u, 1.6)}px "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif`;
+  ctx.fillStyle = '#f2f2ee';
+  ctx.shadowColor = 'rgba(0,0,0,0.8)';
+  ctx.shadowBlur = 18;
+  const pulse = 1 + 0.06 * Math.sin(g.t * 18);
+  ctx.translate(W / 2, H * 0.2);
+  ctx.scale(pulse, pulse);
+  ctx.fillText('굳어라', 0, 0);
+  ctx.font = `500 ${22 * Math.min(u, 1.8)}px "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif`;
+  ctx.globalAlpha = k * 0.85;
+  ctx.fillText(app.input.touchMode ? '파도가 온다  ·  굳기 버튼' : `파도가 온다  ·  ${app.input.label('down')}`, 0, 58 * Math.min(u, 1.6));
+  ctx.restore();
+}
+
 export const sea: LevelDef = {
   id: 'sea',
   width: END + 300,
@@ -410,6 +502,7 @@ export const sea: LevelDef = {
   decor,
   entities,
   triggers,
+  drawOverlay,
   camZones: [
     { x0: -700, x1: 1900, zoom: 0.92 },
     { x0: CAVE.x0, x1: CAVE.x1, zoom: 0.9, yOff: 40 },

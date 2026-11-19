@@ -8,6 +8,7 @@
 import { Entity } from './entities';
 import { Water } from './entities2';
 import type { EntityDef, GameAPI } from './types';
+import type { Solid } from './physics';
 import { audio } from '../core/audio';
 import { clamp, hash1, lerp, TAU } from '../core/math';
 import { INK } from '../gfx/ground';
@@ -246,43 +247,65 @@ export class Beacon extends Entity {
 // ------------------------------------------------------------------
 // 빛이 닿아야 존재하는 발판
 // ------------------------------------------------------------------
+/** 등대 불빛 판자의 한 칸 너비 */
+const CELL = 25;
+
 export class LitPlank extends Entity {
   readonly type = 'litplank';
-  /** 0 = 흐릿한 선, 1 = 단단함 */
+  /** 0 = 흐릿한 선, 1 = 단단함 (칸으로 나뉜 판자는 가장 단단한 칸) */
   solidity = 0;
   private litT = 0;
   private wasSolid = false;
   /** 지우개에 지워진 뒤 다시 그릴 수 없는 시간 */
   private erasedT = 0;
+  /**
+   * 등대 불빛으로 생기는 판자는 칸으로 나눈다: 불빛이 실제로 비추는 칸만 생긴다.
+   * (꽃빛으로 그려지는 스케치 판자는 판자 하나가 통째로)
+   */
+  private cells: { lit: number; k: number }[] = [];
+  /** 굳은 칸들을 이어 붙인 발판들 */
+  solidList: Solid[] | null = null;
   erase() {
     if (this.solidity <= 0 && this.erasedT > 0) return;
     this.solidity = 0;
     this.litT = 0;
     this.erasedT = 0.7;
     this.solid = null;
+    this.solidList = null;
+    for (const c of this.cells) c.lit = c.k = 0;
   }
   constructor(public def: Extract<EntityDef, { type: 'litplank' }>) {
     super(def.id);
+    if (def.by !== 'flower') {
+      const n = Math.max(1, Math.round(def.w / CELL));
+      this.cells = Array.from({ length: n }, () => ({ lit: 0, k: 0 }));
+    }
   }
   private plank() {
     const d = this.def;
     return { x: d.x, y: d.y, w: d.w, h: d.h ?? 22, oneway: d.h === undefined, owner: this, look: 'litplank' };
   }
+  /** x 위치의 칸이 지금 단단한지 (칸 판자) */
+  solidAt(x: number) {
+    const d = this.def;
+    if (!this.cells.length) return this.solid !== null;
+    const i = Math.floor(((x - d.x) / d.w) * this.cells.length);
+    return i >= 0 && i < this.cells.length && this.cells[i].k > 0.85;
+  }
   update(g: GameAPI, dt: number) {
     const d = this.def;
-    let lit = false;
-    if (d.by === 'flower') {
-      // 꽃빛의 반지름 안 (꽃잎 수에 비례)
-      const p = g.player;
-      const r = (g as unknown as { lightRadius(): number }).lightRadius();
-      const cx = clamp(p.x, d.x, d.x + d.w);
-      const cy = clamp(p.y - 70, d.y, d.y + (d.h ?? 22));
-      lit = Math.hypot(cx - p.x, cy - (p.y - 70)) < r && !g.isDead();
-    } else {
-      const b = g.entity<Beacon>(d.by);
-      if (b) for (let k = 0; k <= 4 && !lit; k++) lit = b.illuminates(d.x + (d.w * k) / 4, d.y);
-    }
     this.erasedT -= dt;
+    if (this.cells.length) {
+      this.updateCells(g, dt);
+      return;
+    }
+    let lit = false;
+    // 꽃빛의 반지름 안 (꽃잎 수에 비례)
+    const p = g.player;
+    const r = (g as unknown as { lightRadius(): number }).lightRadius();
+    const cx = clamp(p.x, d.x, d.x + d.w);
+    const cy = clamp(p.y - 70, d.y, d.y + (d.h ?? 22));
+    lit = Math.hypot(cx - p.x, cy - (p.y - 70)) < r && !g.isDead();
     if (lit && this.erasedT <= 0) this.litT = d.hold ?? 0.6;
     else this.litT -= dt;
     const target = this.litT > 0 ? 1 : 0;
@@ -290,6 +313,44 @@ export class LitPlank extends Entity {
     this.solidity = clamp(this.solidity + (target ? dt / 0.3 : -dt / 0.25), 0, 1);
     const solid = this.solidity > 0.85;
     this.solid = solid ? this.plank() : null;
+    this.sound(g, solid);
+  }
+  private updateCells(g: GameAPI, dt: number) {
+    const d = this.def;
+    const b = g.entity<Beacon>(d.by);
+    const n = this.cells.length;
+    const cw = d.w / n;
+    const hold = d.hold ?? 0.6;
+    let any = false;
+    let maxK = 0;
+    for (let i = 0; i < n; i++) {
+      const c = this.cells[i];
+      const lit = !!b && this.erasedT <= 0 && b.illuminates(d.x + (i + 0.5) * cw, d.y);
+      if (lit) c.lit = hold;
+      else c.lit -= dt;
+      // 빛이 닿으면 빠르게 굳고, 빛이 떠나면 잠깐 버티다 흐려진다
+      c.k = clamp(c.k + (c.lit > 0 ? dt / 0.18 : -dt / 0.22), 0, 1);
+      maxK = Math.max(maxK, c.k);
+      if (c.k > 0.85) any = true;
+    }
+    this.solidity = maxK;
+    // 이어진 칸끼리 하나의 발판으로 (칸 사이 이음매에 걸리지 않게)
+    const list: Solid[] = [];
+    let start = -1;
+    for (let i = 0; i <= n; i++) {
+      const on = i < n && this.cells[i].k > 0.85;
+      if (on && start < 0) start = i;
+      if (!on && start >= 0) {
+        list.push({ x: d.x + start * cw, y: d.y, w: (i - start) * cw, h: d.h ?? 22, oneway: d.h === undefined, owner: this, look: 'litplank' } as Solid);
+        start = -1;
+      }
+    }
+    this.solid = null;
+    this.solidList = list.length ? list : null;
+    this.sound(g, any);
+  }
+  private sound(g: GameAPI, solid: boolean) {
+    const d = this.def;
     if (solid !== this.wasSolid && Math.abs(g.player.x - d.x) < 1400) {
       if (solid) audio.play('click3', { vol: 0.25, rate: 1.6 + hash1(d.x) * 0.3 });
       else audio.play('paper_rip', { vol: 0.15, rate: 1.8 });
@@ -299,24 +360,43 @@ export class LitPlank extends Entity {
   drawBack(ctx: CanvasRenderingContext2D, g: GameAPI) {
     const d = this.def;
     const h = d.h ?? 22;
-    const k = this.solidity;
     const sketch = d.by === 'flower';
     ctx.save();
     // 흐릿한 선 (안개 속 윤곽 / 연필 스케치)
-    ctx.globalAlpha = 0.55 * (1 - k) + 0.15;
+    const k0 = this.cells.length ? 0 : this.solidity;
+    ctx.globalAlpha = 0.55 * (1 - k0) + 0.15;
     ctx.strokeStyle = sketch ? '#5a5a57' : '#bdbdb9';
     ctx.lineWidth = 2;
     ctx.setLineDash(sketch ? [10, 7] : [16, 10]);
     const jit = sketch ? Math.sin(g.t * 9 + d.x) * 1.2 : 0;
     ctx.strokeRect(d.x + jit, d.y - jit, d.w, h);
     ctx.setLineDash([]);
-    // 먹선으로 굳은 몸
-    if (k > 0.01) {
+    if (this.cells.length) {
+      // 칸마다: 빛이 닿은 칸만 판자가 된다. 빛이 떠난 칸은 남은 시간만큼 옅어진다
+      const n = this.cells.length;
+      const cw = d.w / n;
+      const hold = d.hold ?? 0.6;
+      for (let i = 0; i < n; i++) {
+        const c = this.cells[i];
+        if (c.k <= 0.01) continue;
+        const fade = c.lit > 0 ? 0.55 + 0.45 * clamp(c.lit / hold) : 0.5;
+        ctx.globalAlpha = c.k * fade;
+        ctx.fillStyle = INK;
+        const x = d.x + i * cw;
+        ctx.fillRect(x - 0.5, d.y + (1 - c.k) * 4, cw + 1, h * (0.4 + 0.6 * c.k));
+        // 판자 결 (칸 경계마다 하나 걸러)
+        if (i % 2 === 1) {
+          ctx.fillStyle = '#2b2b29';
+          ctx.fillRect(x, d.y + 2, 3, h - 4);
+        }
+      }
+    } else if (this.solidity > 0.01) {
+      // 먹선으로 굳은 몸
+      const k = this.solidity;
       ctx.globalAlpha = k;
       ctx.fillStyle = INK;
       ctx.fillRect(d.x, d.y + (1 - k) * 4, d.w, h * (0.4 + 0.6 * k));
       if (!sketch) {
-        // 판자 결
         ctx.fillStyle = '#2b2b29';
         for (let x = d.x + 30; x < d.x + d.w - 10; x += 34) ctx.fillRect(x, d.y + 2, 3, h - 4);
       }
@@ -330,5 +410,7 @@ export class LitPlank extends Entity {
     this.solidity = 0;
     this.litT = 0;
     this.solid = null;
+    this.solidList = null;
+    for (const c of this.cells) c.lit = c.k = 0;
   }
 }

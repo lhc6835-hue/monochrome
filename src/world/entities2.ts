@@ -18,6 +18,8 @@ export type Light = { kind: 'circle'; x: number; y: number; r: number; a: number
 export class Water extends Entity {
   readonly type = 'water';
   level: number;
+  /** 큰 파도: 수면이 x 근처에서 amp 만큼 부풀어 오른 물마루 (그림만, 폭 w) */
+  surge: { x: number; amp: number; w: number } | null = null;
   private moving = false;
   constructor(public def: Extract<EntityDef, { type: 'water' }>) {
     super(def.id);
@@ -58,10 +60,9 @@ export class Water extends Entity {
     ctx.beginPath();
     ctx.moveTo(d.x0, d.floor);
     const step = 24;
-    for (let x = d.x0; x <= d.x1 + 0.1; x += step) {
-      const y = L + Math.sin(x * 0.03 + g.t * 2.2) * 2.5 + noise1(x * 0.01 + g.t * 0.6) * 2;
-      ctx.lineTo(Math.min(x, d.x1), y);
-    }
+    const sg = this.surge && this.surge.amp > 1 ? this.surge : null;
+    const surf = (x: number) => this.surfaceY(x, g.t);
+    for (let x = d.x0; x <= d.x1 + 0.1; x += step) ctx.lineTo(Math.min(x, d.x1), surf(x));
     ctx.lineTo(d.x1, d.floor);
     ctx.closePath();
     ctx.fill();
@@ -70,12 +71,48 @@ export class Water extends Entity {
     ctx.lineWidth = 2;
     ctx.beginPath();
     for (let x = d.x0; x <= d.x1 + 0.1; x += step) {
-      const y = L + Math.sin(x * 0.03 + g.t * 2.2) * 2.5 + noise1(x * 0.01 + g.t * 0.6) * 2;
+      const y = surf(x);
       if (x === d.x0) ctx.moveTo(x, y);
       else ctx.lineTo(Math.min(x, d.x1), y);
     }
     ctx.stroke();
+    // 물마루의 하얀 거품
+    if (sg && sg.amp > 30) {
+      ctx.strokeStyle = `rgba(244,244,240,${Math.min(0.95, sg.amp / 150)})`;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      let on = false;
+      for (let x = sg.x - sg.w * 1.1; x <= sg.x + sg.w * 1.6; x += 12) {
+        if (x < d.x0 || x > d.x1) continue;
+        const y = surf(x);
+        if (!on) {
+          ctx.moveTo(x, y);
+          on = true;
+        } else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(244,244,240,0.8)';
+      for (let i = 0; i < 18; i++) {
+        const x = sg.x - sg.w * 0.4 + noise1(i * 7.1 + g.t * 3) * sg.w * 0.9;
+        ctx.beginPath();
+        ctx.arc(x, surf(x) - 6 - Math.abs(noise1(i * 3.3 + g.t * 5)) * 30, 3 + (i % 3) * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     ctx.restore();
+  }
+  /** 수면 높이 (잔물결 + 큰 파도 물마루) */
+  surfaceY(x: number, t: number) {
+    let y = this.level + Math.sin(x * 0.03 + t * 2.2) * 2.5 + noise1(x * 0.01 + t * 0.6) * 2;
+    const sg = this.surge;
+    if (sg && sg.amp > 1) {
+      // 물마루: 앞(왼쪽)은 가파르고 뒤는 완만하게
+      const u = (x - sg.x) / sg.w;
+      const bump = u < 0 ? Math.exp(-u * u * 2.2) : Math.exp(-u * u * 0.45);
+      y -= sg.amp * bump * (1 + 0.06 * Math.sin(x * 0.05 + t * 9));
+    }
+    return y;
   }
   save() {
     return this.level;

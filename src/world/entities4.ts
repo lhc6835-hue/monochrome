@@ -5,11 +5,14 @@
 import { Entity } from './entities';
 import type { EntityDef, GameAPI } from './types';
 import type { Light } from './entities2';
+import { app } from '../app';
 import { audio } from '../core/audio';
 import { clamp, hash1, rand, TAU } from '../core/math';
 import { INK } from '../gfx/ground';
 
 export const ROOF = -330;
+/** 컨테이너 지붕 높이: 지나가는 신호 철골(밑면 -395) 아래에서 구르면 피할 수 있는 높이 */
+export const CONTAINER_TOP = -300;
 
 // ------------------------------------------------------------------
 // 열차 칸
@@ -92,12 +95,12 @@ export class TrainCar extends Entity {
       for (const px of [x + 4, x + w - 18]) ctx.fillRect(px, -60, 14, 60);
     } else if (kind === 'container') {
       ctx.fillStyle = INK;
-      ctx.fillRect(x + 40, -420, w - 80, 420);
+      ctx.fillRect(x + 40, CONTAINER_TOP, w - 80, -CONTAINER_TOP);
       ctx.strokeStyle = 'rgba(255,255,255,0.09)';
       ctx.lineWidth = 3;
       for (let px = x + 70; px < x + w - 60; px += 30) {
         ctx.beginPath();
-        ctx.moveTo(px, -400);
+        ctx.moveTo(px, CONTAINER_TOP + 20);
         ctx.lineTo(px, -20);
         ctx.stroke();
       }
@@ -186,7 +189,9 @@ export class Hazard extends Entity {
     }
     const ox = p.x + p.w / 2 > this.x + 4 && p.x - p.w / 2 < this.x + this.w - 4;
     if (ox && !g.isDead()) {
-      if (kind === 'beam' && p.y - p.h < -395) g.kill('crush');
+      // 사다리에 매달려 있으면 철골은 머리 위 (칸 사이) 를 지나간다
+      const onLadder = (g.player as unknown as { state: string }).state === 'climb';
+      if (kind === 'beam' && p.y - p.h < -395 && !onLadder) g.kill('crush');
       if (kind === 'tunnel' && p.y - p.h < -352) g.kill('crush');
       if (kind === 'bar' && p.y > -66 && !g.sheltered(p.x, p.y - 60)) g.kill('crush');
     }
@@ -216,6 +221,22 @@ export class Hazard extends Entity {
       ctx.beginPath();
       ctx.arc(x + w / 2, -420, 9, 0, TAU);
       ctx.fill();
+      // 아직 화면 밖이면 오른쪽 끝에서 신호등이 깜빡인다 (언제 오는지 보이게)
+      const edge = g.cam.x + app.screen.W / 2 / g.cam.zoom - 40 / g.cam.zoom;
+      if (x > edge) {
+        const k = clamp(1 - (x - edge) / 1400);
+        ctx.save();
+        ctx.globalAlpha = 0.35 + 0.65 * k;
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.roundRect(edge - 22, -470, 44, 70, 10);
+        ctx.fill();
+        ctx.fillStyle = on ? '#f4f4f0' : '#6a6a66';
+        ctx.beginPath();
+        ctx.arc(edge, -435, 11 + 4 * k, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
     } else if (kind === 'bar') {
       // 철교 아래쪽 가로재와 사선 트러스
       ctx.strokeStyle = '#1b1b1a';

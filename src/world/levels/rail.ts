@@ -12,7 +12,7 @@ import { audio } from '../../core/audio';
 import { PETAL_COLORS } from '../../gfx/flower';
 import { INK } from '../../gfx/ground';
 import { rand } from '../../core/math';
-import { Hazard, ROOF } from '../entities4';
+import { Hazard, ROOF, CONTAINER_TOP } from '../entities4';
 import type { Player } from '../player';
 
 type Kind = 'box' | 'flat' | 'container' | 'passenger' | 'tender' | 'loco';
@@ -39,7 +39,7 @@ CARS.forEach((c, i) => {
     solids.push(inv(c.x, ROOF, 22, i === 0 ? -ROOF : 160));
     solids.push(inv(c.x + c.w - 22, ROOF, 22, 160));
   }
-  if (c.kind === 'container') solids.push(inv(c.x + 40, -420, c.w - 80, 420));
+  if (c.kind === 'container') solids.push(inv(c.x + 40, CONTAINER_TOP, c.w - 80, -CONTAINER_TOP));
   if (c.kind === 'tender') {
     solids.push(inv(c.x + 20, -140, c.w - 40, 140));
     solids.push(inv(c.x + 140, -250, c.w - 280, 110));
@@ -70,18 +70,21 @@ const R = (id: string, x: number, extra: Partial<Extract<EntityDef, { type: 'res
 
 const gapLadder = (i: number, top: number): EntityDef => {
   const c = CARS[i];
-  return { type: 'ladder', id: 'lad' + i, x: c.x + c.w + 40, top, bottom: 0 };
+  const next = CARS[i + 1];
+  // 컨테이너는 칸 사이가 아니라 컨테이너 벽에 기대어 세운다 (꼭대기에서 바로 올라설 수 있게)
+  const x = next?.kind === 'container' ? next.x + 40 - 28 : c.x + c.w + 40;
+  return { type: 'ladder', id: 'lad' + i, x, top, bottom: 0 };
 };
 
 const entities: EntityDef[] = [
   ...CARS.map((c): EntityDef => ({ type: 'car', id: c.id, x: c.x, w: c.w, kind: c.kind })),
   gapLadder(0, ROOF),
-  gapLadder(1, -420),
+  gapLadder(1, CONTAINER_TOP),
   gapLadder(3, ROOF),
   gapLadder(4, ROOF),
   gapLadder(6, -390),
   R('t_child', 1440, { kind: 'child', savable: true, after: 'stay' }),
-  { type: 'petal', id: 'tp_container', x: 2420, y: -480, color: PETAL_COLORS[1] },
+  { type: 'petal', id: 'tp_container', x: 2420, y: CONTAINER_TOP - 70, color: PETAL_COLORS[1] },
   { type: 'memory', id: 'm_station', x: 3390, art: 'station' },
   R('t_p1', 5300, { savable: true, after: 'stay' }),
   R('t_p2', 5520, { savable: true, after: 'stay', kind: 'child' }),
@@ -97,7 +100,7 @@ const triggers: TriggerDef[] = [
   { id: 'h_roof', x: 700, w: 100, once: true, hint: { kb: '칸 사이 사다리로 지붕에 오를 수 있다', dur: 3.5 } },
   { id: 'cp_r1', x: 1000, w: 60, checkpoint: true },
   { id: 'beams', x: 1060, w: 60, once: true, script: 'beams' },
-  { id: 'h_beam', x: 1900, w: 60, once: true, hint: { kb: '종소리가 울리면 철골이 지나간다  ·  지붕 위에서는 구르거나, 칸 안으로', touch: '종소리가 울리면 철골이 지나간다  ·  지붕 위에서는 구르거나, 칸 안으로', dur: 5 } },
+  { id: 'h_beam', x: 1900, w: 60, once: true, hint: { kb: '종소리와 오른쪽 신호등 = 철골이 온다  ·  지붕 위에서는 달리다 ↓ 로 굴러서 밑으로', touch: '종소리와 오른쪽 신호등 = 철골이 온다  ·  지붕 위에서는 달리다 ↓ 로 굴러서 밑으로', dur: 5 } },
   { id: 'cp_r2', x: 2960, w: 60, y: -120, h: 200, checkpoint: true },
   { id: 'tunnel', x: 3040, w: 60, once: true, script: 'tunnel' },
   { id: 'blank', x: 3700, w: 60, once: true, script: 'blank' },

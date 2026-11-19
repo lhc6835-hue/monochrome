@@ -601,3 +601,50 @@ export function reachIK(p: Pose, limb: 'arm' | 'leg', i: 0 | 1, tx: number, ty: 
     p.legs[i].b = bend * s;
   }
 }
+
+/**
+ * 옆모습 자세(|turn| = 1)에서 팔/다리 끝을 목표점에 닿게 한다 (2관절 IK).
+ * (tx, ty) 는 발 중심 기준 H 단위 로컬 좌표. 무릎은 앞으로, 팔꿈치는 아래로 굽는다.
+ * 몸통 기울기(lean)와 웅크림(crouch)을 반영한다.
+ */
+export function sideIK(p: Pose, limb: 'arm' | 'leg', i: 0 | 1, tx: number, ty: number) {
+  const f = p.turn >= 0 ? 1 : -1;
+  const th = p.lean * f;
+  const hipY = -(HIP - p.crouch);
+  const arm = limb === 'arm';
+  // 어깨는 몸통 윗부분 반원의 중심, 골반은 엉덩이 중심 (lean 만큼 엉덩이를 축으로 돈다)
+  const ly = arm ? SIDE_SHOULDER_Y : 0;
+  const ox = p.bodyX - ly * Math.sin(th),
+    oy = hipY + ly * Math.cos(th);
+  const L1 = arm ? UPPER_ARM : THIGH;
+  const L2 = arm ? LOWER_ARM : SHIN;
+  let vx = tx - ox,
+    vy = ty - oy;
+  let d = Math.hypot(vx, vy);
+  const maxD = L1 + L2 - 1e-4;
+  if (d > maxD) {
+    vx *= maxD / d;
+    vy *= maxD / d;
+    d = maxD;
+  }
+  d = Math.max(d, 1e-4);
+  const base = Math.atan2(vy, vx);
+  const A = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+  const c1 = base + A,
+    c2 = base - A;
+  // 무릎: 앞쪽(f) 으로 / 팔꿈치: 아래쪽으로
+  const fw = (c: number) => f * Math.cos(c);
+  const up1 = arm ? (Math.sin(c1) >= Math.sin(c2) ? c1 : c2) : fw(c1) >= fw(c2) ? c1 : c2;
+  const ex = ox + Math.cos(up1) * L1,
+    ey = oy + Math.sin(up1) * L1;
+  const lo = Math.atan2(oy + vy - ey, ox + vx - ex);
+  const phi1 = up1 - Math.PI / 2;
+  const phi2 = lo - Math.PI / 2;
+  if (arm) {
+    p.arms[i].a = wrapPi((th - phi1) * f);
+    p.arms[i].b = wrapPi((phi1 - phi2) * f);
+  } else {
+    p.legs[i].a = wrapPi(-phi1 * f);
+    p.legs[i].b = wrapPi((phi2 - phi1) * f);
+  }
+}

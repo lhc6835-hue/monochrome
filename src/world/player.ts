@@ -5,7 +5,7 @@ import { Box } from './entities';
 import { ROLL_CONTACTS, ROLL_T, sampleRoll, RollPath } from './roll';
 import { audio } from '../core/audio';
 import { clamp, damp, ease, lerp, noise1 } from '../core/math';
-import { applyIdle, applyRunCycle, clonePose, drawFigure, lerpPose, plantLegs, reachIK, rigidPose, defaultStyle, type Pose, type Joints } from '../gfx/figure';
+import { applyIdle, applyRunCycle, clonePose, drawFigure, lerpPose, plantLegs, reachIK, sideIK, rigidPose, defaultStyle, type Pose, type Joints } from '../gfx/figure';
 import { drawFlower, drawGlow, PETAL_COLORS } from '../gfx/flower';
 import { drawBlankFigure } from '../gfx/blank';
 
@@ -29,6 +29,9 @@ export const PH = {
 /** 사다리 가로대 간격, 한 칸 오르는 시간 */
 export const RUNG = 34;
 const CLIMB_STEP = 0.19;
+/** 꼭대기를 넘어가는 시간, 사다리 위에서 몸이 사다리 뒤로 물러난 거리 */
+const CLIMB_EXIT_T = 0.62;
+const CLIMB_BACK = 30;
 /** 구르기: 발이 엉덩이 밑에 닿는 순간 (여기서 일어설 수 없으면 다시 한 바퀴) */
 const ROLL_REPEAT_AT = 0.7;
 const ROLL_REPEAT_TO = 0.12;
@@ -89,6 +92,15 @@ export class Player implements PlayerLike {
   private climbE = 0;
   private climbDir = 0;
   private climbExit = 0;
+  /** 꼭대기 동작 방향 (1 = 올라서기, -1 = 내려서기) */
+  private climbExitDir = 1;
+  /** 사다리 위에서 바라보는 쪽, 올라설 쪽 */
+  private climbFace = 1;
+  private climbSide = 1;
+  private climbFrom: [number, number] = [0, 0];
+  private climbTo: [number, number] = [0, 0];
+  private climbEdge = 0;
+  private lastSolids: Solid[] = [];
   private fallStartY = 0;
   private idleT = 0;
   private stepI = 0;
@@ -156,6 +168,7 @@ export class Player implements PlayerLike {
     let ax = control ? inp.axisX : 0;
     const downHeld = control && inp.down('down');
     const solids = g.solids();
+    this.lastSolids = solids;
     // 물
     const water = g.waterAt(b.x);
     const prevSub = this.submerge;
@@ -168,40 +181,59 @@ export class Player implements PlayerLike {
     }
     this.hopT = Math.max(0, this.hopT - dt);
 
-    // ---------- 사다리: 가로대를 하나씩 잡고 오른다 ----------
+    // ---------- 사다리: 옆모습으로 가로대를 하나씩 잡고 오른다 ----------
     if (this.state === 'climb' && this.ladder) {
       const L = this.ladder;
       const upHeld = control && (inp.down('up') || (inp.touchMode && inp.down('jump')));
       const downHeld = control && inp.down('down');
+      const side = control ? Math.sign(inp.axisX) : 0;
       const M = Math.floor((L.bottom - L.top) / RUNG);
       b.vx = 0;
       b.vy = 0;
-      b.x = damp(b.x, L.x, 14, dt);
+      // 꼭대기 넘어가기 / 꼭대기에서 내려오기 (정해진 동작)
       if (this.climbExit !== 0) {
-        // 꼭대기로 올라서기
-        this.climbExit += dt / 0.34;
-        const k = ease.inOutSine(clamp(this.climbExit));
-        b.y = lerp(L.bottom - M * RUNG, L.top, k);
-        if (this.climbExit >= 1) {
-          b.y = L.top;
-          this.state = 'normal';
-          this.ladder = null;
+        this.climbExit += dt / CLIMB_EXIT_T;
+        const k = clamp(this.climbExit);
+        const u = this.climbExitDir > 0 ? k : 1 - k;
+        const [x0, y0] = this.climbFrom,
+          [x1, y1] = this.climbTo;
+        b.x = lerp(x0, x1, ease.inOutSine(clamp((u - 0.12) / 0.8)));
+        b.y = lerp(y0, y1, ease.inOutSine(clamp(u / 0.72)));
+        if (k >= 1) {
           this.climbExit = 0;
-          b.onGround = true;
-          audio.step(this.stepI++, 0.35, true);
+          if (this.climbExitDir > 0) {
+            b.x = x1;
+            b.y = y1;
+            this.state = 'normal';
+            this.ladder = null;
+            this.facing = this.climbSide;
+            b.onGround = true;
+            audio.step(this.stepI++, 0.35, true);
+          } else {
+            b.x = x0;
+            b.y = y0;
+            this.climbM = this.climbTopM(L);
+          }
         }
         this.animate(g, dt);
         return;
       }
+      b.x = damp(b.x, L.x - this.climbFace * CLIMB_BACK, 16, dt);
+      const topM = this.climbTopM(L);
       let left = dt;
       while (left > 0) {
         if (this.climbDir === 0) {
-          if (upHeld) {
-            if (this.climbM < M) this.climbDir = 1;
-            else {
-              this.climbExit = 0.0001;
+          // 꼭대기: 위나 옆으로 누르면 올라설 곳으로 넘어간다
+          if (this.climbM >= topM && (upHeld || side !== 0)) {
+            const ex = this.ladderExit(L, side, solids);
+            if (ex) {
+              this.beginLadderExit(L, ex[0], ex[1], 1);
               break;
             }
+          }
+          if (upHeld) {
+            if (this.climbM < M) this.climbDir = 1;
+            else break;
           } else if (downHeld) {
             if (this.climbM > 0) this.climbDir = -1;
             else {
@@ -226,31 +258,55 @@ export class Player implements PlayerLike {
           left = 0;
         }
       }
-      if (this.state === 'climb') b.y = L.bottom - (this.climbM + this.climbDir * ease.inOutSine(this.climbE)) * RUNG;
-      if (control && ((inp.pressed('jump') && !inp.down('up') && !inp.touchMode) || (inp.touchMode && inp.axisX !== 0))) {
+      if (this.state === 'climb' && this.climbExit === 0) b.y = L.bottom - (this.climbM + this.climbDir * ease.inOutSine(this.climbE)) * RUNG;
+      // 점프: 사다리를 박차고 뛰어내린다 (터치: 꼭대기가 아닌 곳에서 옆으로 밀면)
+      if (this.state === 'climb' && this.climbExit === 0 && control && ((inp.pressed('jump') && !inp.down('up') && !inp.touchMode) || (inp.touchMode && side !== 0 && this.climbM < topM))) {
         this.state = 'normal';
         this.ladder = null;
-        b.vy = -520;
-        b.vx = inp.axisX * 260;
+        const d = side || -this.climbFace;
+        this.facing = d;
+        b.vy = -480;
+        b.vx = d * 260;
       }
       this.animate(g, dt);
       return;
     }
     if (this.state === 'normal' && control && !this.grabbing) {
       for (const L of g.ladders()) {
-        if (Math.abs(b.x - L.x) > 40) continue;
-        const onBody = b.y > L.top + 4 && b.y - b.h < L.bottom;
+        const dx = b.x - L.x;
         const atTop = Math.abs(b.y - L.top) < 6 && b.onGround;
-        if (((inp.down('up') || (inp.touchMode && inp.down('jump'))) && onBody) || (inp.down('down') && atTop)) {
+        // 꼭대기에서 ↓: 몸을 돌려 사다리로 내려선다
+        if (atTop && inp.down('down') && Math.abs(dx) < 90) {
+          const s = Math.abs(dx) > 8 ? Math.sign(dx) : this.facing;
+          this.state = 'climb';
+          this.ladder = L;
+          this.buffer = 0;
+          this.jumping = false;
+          this.climbDir = 0;
+          this.climbE = 0;
+          this.climbFace = s;
+          this.climbM = this.climbTopM(L);
+          this.beginLadderExit(L, b.x, b.y, -1);
+          audio.play('clunk', { vol: 0.3, rate: 1.4 });
+          this.animate(g, dt);
+          return;
+        }
+        if (Math.abs(dx) > 40) continue;
+        const onBody = b.y > L.top + 4 && b.y - b.h < L.bottom;
+        if ((inp.down('up') || (inp.touchMode && inp.down('jump'))) && onBody) {
           this.state = 'climb';
           this.ladder = L;
           this.buffer = 0;
           this.jumping = false;
           const M = Math.floor((L.bottom - L.top) / RUNG);
-          this.climbM = atTop && inp.down('down') ? M : clamp(Math.round((L.bottom - b.y) / RUNG), 0, M);
+          this.climbM = clamp(Math.round((L.bottom - b.y) / RUNG), 0, Math.min(M, this.climbTopM(L)));
           this.climbE = 0;
           this.climbDir = 0;
           this.climbExit = 0;
+          // 꼭대기에서 올라설 곳이 한쪽뿐이면 그쪽을 보고 오른다
+          const l = !!this.ladderExit(L, -1, solids, true),
+            r = !!this.ladderExit(L, 1, solids, true);
+          this.climbFace = l && !r ? -1 : r && !l ? 1 : this.facing;
           b.y = L.bottom - this.climbM * RUNG;
           audio.play('clunk', { vol: 0.3, rate: 1.4 });
           this.animate(g, dt);
@@ -808,63 +864,161 @@ export class Player implements PlayerLike {
     this.pose = P;
   }
 
-  /** 사다리 위 자세: 손은 가로대를 잡고, 발은 가로대를 딛는다 */
-  private climbPose(P: Pose, dt: number) {
+  /** 꼭대기 동작을 시작하는 칸: 허리가 꼭대기 높이에 닿는 곳 */
+  private climbTopM(L: LadderLike) {
+    const M = Math.floor((L.bottom - L.top) / RUNG);
+    return Math.max(0, Math.min(M, Math.round((L.bottom - L.top - 62) / RUNG)));
+  }
+  /**
+   * 꼭대기에서 올라설 자리. want(누른 방향) → 바라보는 쪽 → 반대쪽 순서로 찾는다.
+   * 사다리 옆 턱(열차 지붕)이든, 사다리가 뚫고 올라온 바닥이든 같은 방식.
+   */
+  private ladderExit(L: LadderLike, want: number, solids: Solid[], only = false): [number, number] | null {
+    const b = this.body;
+    const find = (s: number) => {
+      for (const d of [26, 38, 52, 66, 82, 96]) {
+        const x = L.x + s * d;
+        // 발 디딜 곳이 몸 폭만큼은 있어야 한다 (모서리에 아슬아슬하게 서지 않게)
+        const o = solids.find((o) => Math.abs(o.y - L.top) <= 3 && o.x <= x - 14 && o.x + o.w >= x + 14);
+        if (!o) continue;
+        if (!areaFree({ x: x - b.w / 2, y: L.top - PH.H - 1, w: b.w, h: PH.H - 2 }, solids)) continue;
+        return { s, d, x, edge: clamp(s > 0 ? o.x : o.x + o.w, Math.min(L.x, x), Math.max(L.x, x)) };
+      }
+      return null;
+    };
+    let best: { s: number; d: number; x: number; edge: number } | null = null;
+    if (only || want !== 0) best = find(want);
+    else {
+      // 누른 방향이 없으면 가까운 쪽 (같으면 바라보는 쪽)
+      const a = find(this.climbFace),
+        c = find(-this.climbFace);
+      best = a && c ? (a.d <= c.d + 14 ? a : c) : a || c;
+    }
+    if (!best) return null;
+    this.climbSide = best.s;
+    this.climbEdge = best.edge;
+    return [best.x, L.top];
+  }
+  /** 꼭대기 넘어가기(dir 1) 또는 꼭대기에서 사다리로 내려서기(dir -1) */
+  private beginLadderExit(L: LadderLike, fx: number, fy: number, dir: 1 | -1) {
+    const tm = this.climbTopM(L);
+    const b = this.body;
+    this.climbFrom = dir > 0 ? [b.x, b.y] : [L.x - this.climbFace * CLIMB_BACK, L.bottom - tm * RUNG];
+    this.climbTo = [fx, fy];
+    if (dir < 0) {
+      this.climbSide = Math.sign(fx - L.x) || this.climbFace;
+      this.ladderExit(L, this.climbSide, this.lastSolids, true);
+    }
+    this.climbExitDir = dir;
+    this.climbExit = 0.0001;
+    this.climbDir = 0;
+    this.climbE = 0;
+    audio.play('swish3', { vol: 0.22, rate: 1.1 });
+  }
+
+  /** 사다리 위 자세: 옆모습으로 손은 가로대를 번갈아 잡고, 발은 가로대를 딛는다 */
+  private climbPose(P: Pose, _dt: number) {
     const L = this.ladder!;
     const b = this.body;
     const S = PH.SCALE;
-    P.turn = damp(this.pose.turn, 0, 14, dt);
-    P.crouch = 0.03;
+    const f = this.climbFace;
+    const rungY = (k: number) => L.bottom - k * RUNG;
+    const railTop = L.top - 26;
+    // 월드 좌표 목표 → 로컬 IK
+    const arm = (i: 0 | 1, x: number, y: number) => sideIK(P, 'arm', i, (x - b.x) / S, (y - b.y) / S);
+    const leg = (i: 0 | 1, x: number, y: number) => sideIK(P, 'leg', i, (x - b.x) / S, (y - 7.9 - b.y) / S);
+    const near = (f > 0 ? 0 : 1) as 0 | 1;
+    const far = (1 - near) as 0 | 1;
+
+    if (this.climbExit !== 0) {
+      // ----- 꼭대기 넘어가기: 바닥을 짚고 → 몸을 끌어올리고 → 앞발을 올려 딛고 → 일어선다 -----
+      const k = clamp(this.climbExit);
+      const u = this.climbExitDir > 0 ? k : 1 - k;
+      const s = this.climbSide;
+      // 몸은 처음엔 사다리 쪽을 보다가, 올라설 쪽으로 돈다
+      const tw = ease.inOutSine(clamp((u - 0.05) / 0.3));
+      P.turn = f === s ? s : lerp(f, s, tw) >= 0 ? 1 : -1;
+      const sf = P.turn >= 0 ? 1 : -1;
+      const nI = (sf > 0 ? 0 : 1) as 0 | 1;
+      const fI = (1 - nI) as 0 | 1;
+      const push = Math.sin(Math.PI * clamp(u / 0.85));
+      P.lean = 0.42 * push;
+      P.crouch = 0.05 * push;
+      P.headTilt = -0.15 * push;
+      const [x0, y0] = this.climbFrom;
+      const edge = this.climbEdge;
+      // 손: 바닥 모서리를 짚고 밀다가 (u < 0.7), 몸이 다 올라오면 내려놓는다
+      const handOn = 1 - ease.inOutSine(clamp((u - 0.62) / 0.3));
+      for (const i of [nI, fI]) {
+        const hx = edge + s * (i === nI ? 14 : 2);
+        const hy = L.top - 3;
+        const rx = b.x + sf * (i === nI ? 6 : -4),
+          ry = b.y - 64;
+        arm(i, lerp(rx, hx, handOn), lerp(ry, hy, handOn));
+      }
+      // 앞발: 무릎을 높이 들어 바닥에 올려 딛는다 / 뒷발: 마지막 가로대를 밀고 따라온다
+      const step = ease.inOutSine(clamp((u - 0.28) / 0.34));
+      const lift = Math.sin(Math.PI * clamp((u - 0.28) / 0.34));
+      const nfx = lerp(x0 + f * 4, this.climbTo[0] + s * 4, step),
+        nfy = Math.min(lerp(y0 - RUNG, L.top, step) - 26 * lift, b.y + 0);
+      leg(nI, nfx, Math.max(nfy, b.y - 70));
+      const trail = ease.inOutSine(clamp((u - 0.62) / 0.3));
+      const tlift = Math.sin(Math.PI * trail);
+      const tfx = lerp(x0 + f * 2, this.climbTo[0] - s * 6, trail),
+        tfy = lerp(y0, L.top, trail) - 18 * tlift;
+      leg(fI, tfx, Math.min(tfy, b.y));
+      // 다 올라서면 평소 서 있는 자세로
+      const st = ease.inOutSine(clamp((u - 0.86) / 0.14));
+      if (st > 0) {
+        const I = rigidPose();
+        applyIdle(I, 0, sf, 0);
+        I.turn = sf;
+        lerpPose(P, I, st, P);
+      }
+      P.headY = 0;
+      return;
+    }
+
+    P.turn = f;
+    P.lean = 0.14;
+    P.crouch = 0;
+    P.headTilt = -0.16;
     const m = this.climbM;
     const dir = this.climbDir;
-    const e = dir !== 0 ? this.climbE : this.climbExit > 0 ? 0 : 0;
-    const le = ease.inOutSine(clamp(e * 1.3));
-    const hh = (((m % 2) + 2) % 2 === 0 ? 0 : 1) as 0 | 1; // 높은 손 쪽
-    const lo = (1 - hh) as 0 | 1;
-    const rungY = (k: number) => L.bottom - k * RUNG;
-    // 손 (가로대 중심), 발 (가로대 윗면)
-    const handPos: [number, number][] = [
-      [0, 0],
-      [0, 0],
-    ];
-    const footPos: [number, number][] = [
-      [0, 0],
-      [0, 0],
-    ];
-    const sideX = (i: number, w: number) => L.x + (i === 0 ? -w : w);
-    // 기본 위치
-    handPos[hh] = [sideX(hh, 15), rungY(m + 5)];
-    handPos[lo] = [sideX(lo, 15), rungY(m + 4)];
-    footPos[lo] = [sideX(lo, 11), rungY(m)];
-    footPos[hh] = [sideX(hh, 11), rungY(m + 1)];
+    const e = dir !== 0 ? this.climbE : 0;
+    const le = ease.inOutSine(clamp(e * 1.15));
     const arc = Math.sin(Math.PI * le);
+    // 칸마다 손발이 번갈아 (한쪽 손 + 반대쪽 발)
+    const hh = ((((m % 2) + 2) % 2 === 0 ? near : far) as 0 | 1);
+    const lo = (1 - hh) as 0 | 1;
+    const hx = L.x + f * 4,
+      fx = L.x - f * 12;
+    const clampH = (y: number) => Math.max(y, railTop);
+    let hyH = rungY(m + 4),
+      hyL = rungY(m + 3);
+    let hxH = hx,
+      hxL = hx;
+    let fyH = rungY(m + 1),
+      fyL = rungY(m);
+    let fxH = fx,
+      fxL = fx;
     if (dir > 0) {
-      // 낮은 손 → 두 칸 위, 낮은 발 → 두 칸 위
-      handPos[lo] = [sideX(lo, 15 + 9 * arc), lerp(rungY(m + 4), rungY(m + 6), le) - 6 * arc];
-      footPos[hh] = [sideX(hh, 11 + 7 * arc), lerp(rungY(m), rungY(m + 2), le) - 10 * arc];
+      // 낮은 손 → 두 칸 위로, 낮은 발 → 두 칸 위로 (가로대에서 살짝 떼어 뒤로 둥글게)
+      hyL = lerp(rungY(m + 3), rungY(m + 5), le) - 4 * arc;
+      hxL = hx - f * 9 * arc;
+      fyL = lerp(rungY(m), rungY(m + 2), le) - 6 * arc;
+      fxL = fx - f * 12 * arc;
     } else if (dir < 0) {
-      // 높은 손 → 두 칸 아래, 높은 발 → 두 칸 아래
-      handPos[hh] = [sideX(hh, 15 + 9 * arc), lerp(rungY(m + 5), rungY(m + 3), le) - 6 * arc];
-      footPos[lo] = [sideX(lo, 11 + 7 * arc), lerp(rungY(m + 1), rungY(Math.max(0, m - 1)), le) - 10 * arc];
+      hyH = lerp(rungY(m + 4), rungY(m + 2), le) - 4 * arc;
+      hxH = hx - f * 9 * arc;
+      fyH = lerp(rungY(m + 1), rungY(Math.max(0, m - 1)), le) - 6 * arc;
+      fxH = fx - f * 12 * arc;
     }
-    // 꼭대기: 손은 바닥 모서리를 짚고 몸을 밀어 올린다, 발은 따라 올라온다
-    const exitK = this.climbExit > 0 ? ease.inOutSine(clamp(this.climbExit)) : 0;
-    for (const i of [0, 1] as const) {
-      let [hx, hy] = handPos[i];
-      if (hy < L.top - 4) {
-        hy = L.top - 2;
-        hx = sideX(i, 24);
-      }
-      reachIK(P, 'arm', i, (hx - b.x) / S, (hy - 4 - b.y) / S);
-      let [fx, fy] = footPos[i];
-      if (exitK > 0) {
-        fy = lerp(fy, b.y, ease.inQuad(exitK));
-        fx = lerp(fx, sideX(i, 9), exitK);
-      }
-      reachIK(P, 'leg', i, (fx - b.x) / S, (Math.min(L.bottom, fy) - 7.9 - b.y) / S);
-    }
-    if (exitK > 0) P.lean = 0;
-    P.headY = -0.006 + Math.sin(Math.PI * le) * 0.004;
+    arm(hh, hxH, clampH(hyH));
+    arm(lo, hxL, clampH(hyL));
+    leg(lo, fxL, Math.min(L.bottom, fyL));
+    leg(hh, fxH, Math.min(L.bottom, fyH));
+    P.headY = -0.004 * arc;
   }
 
   draw(ctx: CanvasRenderingContext2D, g: GameAPI, petals: string[]) {
@@ -886,7 +1040,7 @@ export class Player implements PlayerLike {
         st.alpha = 1 - clamp((this.deathT - 0.5) / 0.6);
       }
     }
-    const hide = this.freezeAmt > 0.5 || this.hideFlower;
+    const hide = this.freezeAmt > 0.5 || this.hideFlower || this.state === 'climb';
     const fsize = 22;
     // 구르기: 엉덩이를 축으로 몸을 돌리고, 가장 낮은 점(손/어깨/등/발)을 바닥에 붙인다
     const rk = this.rollK,

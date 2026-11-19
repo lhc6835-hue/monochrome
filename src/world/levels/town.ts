@@ -232,61 +232,56 @@ function* escape(g: GameAPI): Co {
   audio.play('swish2', { vol: 0.8 });
   audio.step(0, 0.5);
   const bx0 = bx;
-  const T_MISS = 0.5;
+  // 손끝이 등에 닿을락 말락 하는 순간 (뛰어오른 몸이 막 떨어지기 시작할 때)
+  const T_MISS = 0.44;
   let t = 0;
   let missed = false;
   let hand: [number, number] = [bx + 200, -300];
-  const ctl: BlankCtl = { bx, by: -20, lean: 0.3, crouch: 0, head: 0.1, hand: null };
+  const ctl: BlankCtl = { bx, by: -20, lean: 0.3, crouch: 0, head: 0.1, hand: null, grip: 0.2 };
   S.blankCtl = ctl;
   audio.muffle(0.55, 0.3);
-  // 팔은 어깨를 축으로 크게 휘두른다 (뒤 위로 치켜들었다가 → 머리 위를 지나 → 앞 아래로 내리꽂는다)
-  const ARM = 0.34 * 430;
-  let ang = 0.4,
-    rad = ARM * 0.8;
-  let missAng = 0.6,
-    missRad = ARM;
+  let cock: [number, number] = [0, 0];
+  let miss: [number, number] = [0, 0];
   while (t < 1.3) {
     const dt = S.dt;
     t += dt;
     // 느린 화면: 손이 덮쳐 오는 순간부터 빗나갈 때까지
-    S.timeScale = t < 0.3 ? lerp(1, 0.2, ease.inOutSine(clamp((t - 0.16) / 0.14))) : t < 0.66 ? 0.2 : lerp(0.2, 1, ease.inOutSine(clamp((t - 0.66) / 0.22)));
-    // 몸: 구덩이 끝까지 덮쳐 오며 상체를 던지듯 숙이고 →
+    S.timeScale = t < 0.3 ? lerp(1, 0.2, ease.inOutSine(clamp((t - 0.16) / 0.14))) : t < 0.62 ? 0.2 : lerp(0.2, 1, ease.inOutSine(clamp((t - 0.62) / 0.22)));
+    // 몸: 구덩이 끝까지 달려들며 → 손을 내지르는 순간 온몸을 앞으로 던지듯 숙이고 →
     //     헛손질의 기세에 앞으로 쏠려 가장자리에서 휘청 → 겨우 버티고 선다
+    const thrust = ease.inOutSine(clamp((t - 0.2) / (T_MISS - 0.2)));
     const lurch = ease.inOutSine(clamp((t - T_MISS) / 0.2)) * (1 - 0.6 * ease.inOutSine(clamp((t - 0.78) / 0.45)));
-    ctl.bx = lerp(bx0, EDGE - 185, ease.outCubic(clamp(t / 0.35))) + 34 * lurch;
-    ctl.crouch = 0.04 * lurch;
-    ctl.lean = lerp(0.3, 0.62, ease.inOutSine(clamp((t - 0.14) / 0.32))) + 0.3 * lurch + Math.sin(Math.max(0, t - 0.75) * 9) * 0.03 * clamp((t - 0.75) / 0.2) * (1 - clamp((t - 1.1) / 0.2));
-    ctl.head = lerp(0.1, 0.5, clamp(t / 0.5)) + 0.25 * lurch;
-    // 다른 팔: 손을 뻗는 동안 뒤로 젖혀 균형을 잡고, 휘청일 때 앞으로 허우적인다
-    const swing = ease.inOutSine(clamp((t - 0.2) / 0.3));
-    ctl.hand2 = [lerp(lerp(1.0, -0.45, swing), 0.5, lurch), lerp(0.4, 0.7, lurch)];
+    ctl.bx = lerp(bx0, EDGE - 232, ease.outCubic(clamp(t / 0.35))) + 22 * thrust + 26 * lurch;
+    ctl.crouch = 0.05 * thrust + 0.03 * lurch;
+    ctl.lean = lerp(0.3, 0.45, ease.inOutSine(clamp(t / 0.2))) + 0.5 * thrust + 0.18 * lurch + Math.sin(Math.max(0, t - 0.75) * 9) * 0.03 * clamp((t - 0.75) / 0.2) * (1 - clamp((t - 1.1) / 0.2));
+    ctl.head = lerp(0.1, 0.4, clamp(t / 0.4)) + 0.2 * lurch;
+    // 다른 팔: 손을 내지르는 동안 뒤로 젖혀 균형을 잡고, 휘청일 때 앞으로 허우적인다
+    ctl.hand2 = [lerp(lerp(1.0, -0.5, thrust), 0.5, lurch), lerp(0.4, 0.7, lurch)];
     S.chase.front = Math.min(ctl.bx + 90, EDGE);
     // 어깨 위치 (여백의 그림 비율: 엉덩이 0.42, 어깨는 엉덩이 위 0.311, 상체 기울기만큼 앞으로)
     const sh: [number, number] = [ctl.bx + 134 * Math.sin(ctl.lean), ctl.by - 180.6 - 134 * Math.cos(ctl.lean)];
-    if (t < 0.24) {
-      // 예비 동작: 팔을 곧게 편 채 뒤 위로 크게 치켜든다 (팔꿈치가 얼굴 앞으로 접히지 않게)
-      const u = ease.inOutSine(clamp(t / 0.24));
-      ang = lerp(0.4, -2.05, u);
-      rad = lerp(ARM * 0.8, ARM * 1.3, u);
+    let target: [number, number];
+    if (t < 0.22) {
+      // 예비 동작: 손을 허리 뒤로 끌어당기며 손가락을 벌린다
+      const u = ease.inOutSine(clamp(t / 0.22));
+      cock = [sh[0] + lerp(90, -20, u), sh[1] + lerp(60, 95, u)];
+      target = cock;
+      ctl.grip = lerp(0.2, 0, u);
     } else if (t < T_MISS) {
-      // 머리 위를 지나 앞으로 내리꽂으며, 뛰어내린 몸의 머리 바로 뒤를 노린다 (점점 빨라진다, 손끝 한 뼘 차이로 빗나간다)
-      const u = ease.inQuad(clamp((t - 0.24) / (T_MISS - 0.24)));
-      const back: [number, number] = [b.x - 44, b.y - 150];
-      const aim = Math.atan2(back[1] - sh[1], back[0] - sh[0]);
-      const dist = Math.min(Math.hypot(back[0] - sh[0], back[1] - sh[1]), ARM);
-      ang = lerp(-2.05, aim, u);
-      rad = lerp(ARM * 1.3, dist, ease.inQuad(u));
-      missAng = ang;
-      missRad = rad;
+      // 손가락을 활짝 편 채, 뛰어오른 몸을 향해 곧장 내지른다 (점점 빨라진다)
+      // 노리는 곳은 몸이 '조금 전에' 있던 자리 — 몸은 이미 앞으로 빠져나가고 있다
+      const u = ease.inQuad(clamp((t - 0.22) / (T_MISS - 0.22)));
+      const aim: [number, number] = [b.x - 58, b.y - 74];
+      target = [lerp(cock[0], aim[0], u), lerp(cock[1], aim[1], u)];
+      miss = target;
+      ctl.grip = 0;
     } else {
-      // 허공을 움켜쥔 주먹이 기세에 밀려 구덩이 쪽으로 더 내리꽂혔다가, 축 늘어진다
-      const f = ease.outCubic(clamp((t - T_MISS) / 0.32));
+      // 등 바로 뒤에서 손가락이 허공을 움켜쥐고, 주먹이 움찔 당겨진다 (몸은 그 앞으로 떨어져 간다)
+      const f = ease.outCubic(clamp((t - T_MISS) / 0.3));
       const hang = ease.inOutSine(clamp((t - 0.85) / 0.45));
-      ang = Math.min(missAng + 0.4 * f, 1.35) - 0.12 * hang;
-      rad = lerp(missRad, ARM, f);
+      target = [miss[0] - 14 * f - 6 * hang, miss[1] + 22 * f + 14 * hang];
+      ctl.grip = ease.outCubic(clamp((t - T_MISS) / 0.07));
     }
-    const target: [number, number] = [sh[0] + Math.cos(ang) * rad, sh[1] + Math.sin(ang) * rad];
-    // 처음 몇 프레임만 쫓던 손에서 부드럽게 넘어오고, 그다음부터는 휘두르는 궤적을 그대로 따른다
     const follow = t < 0.08 ? 20 : 60;
     hand = [lerp(hand[0], target[0], 1 - Math.exp(-dt * follow)), lerp(hand[1], target[1], 1 - Math.exp(-dt * follow))];
     ctl.hand = hand;
@@ -324,6 +319,8 @@ function* escape(g: GameAPI): Co {
     const reach: [number, number] = [EDGE + 70 + Math.sin(t * 2.2) * 25, 60 + Math.sin(t * 1.3) * 10];
     hand = [lerp(hand[0], reach[0], 1 - Math.exp(-dt * 3)), lerp(hand[1], reach[1], 1 - Math.exp(-dt * 3))];
     ctl.hand = hand;
+    // 움켜쥔 주먹을 천천히 풀며, 떨어지는 몸을 향해 다시 손을 뻗는다
+    ctl.grip = lerp(ctl.grip ?? 1, 0.3, 1 - Math.exp(-dt * (t > 0.4 ? 1.6 : 0)));
     if (Math.random() < dt * 10) S.parts.paper(EDGE - 20 + Math.random() * 30, -10 - Math.random() * 60, 1, 0.8);
     cam.y = Math.min(Math.max(-250, b.y - 280), 160);
     if (b.y > 380) S.cineFade = Math.min(1, S.cineFade + dt / 1.0);

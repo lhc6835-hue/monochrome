@@ -10,7 +10,7 @@ import { drawSky, drawLayers, type BgTheme } from '../gfx/background';
 import { drawIcon, type IconName } from '../gfx/icons';
 import { drawBlock, drawGroundSlab, drawCrack, INK } from '../gfx/ground';
 import { drawFlower, drawGlow, drawPetal, PETAL_COLORS } from '../gfx/flower';
-import { blankReach, drawBlankFigure, drawErasedRegion, PAPER } from '../gfx/blank';
+import { blankReach, drawBlankFigure, drawBlankHand, drawErasedRegion, PAPER } from '../gfx/blank';
 import { drawMemory, memoryReadyAt } from '../gfx/memoryArt';
 import { plantLegs, rigidPose } from '../gfx/figure';
 import { Player, PH } from '../world/player';
@@ -1860,6 +1860,18 @@ export class GameScene implements Scene, GameAPI {
     if (ctl?.still && this.stillT < 0) this.stillT = this.t;
     if (!ctl?.still) this.stillT = -1;
     drawBlankFigure(L.ctx, B.P, B.bx, B.by, B.scale, ctl?.still ? this.stillT : this.t, ctl?.alpha ?? 1);
+    // 손가락: 붙잡으려 뻗는 손은 손가락을 활짝 폈다가 움켜쥔다 (팔뚝 방향으로)
+    if (ctl && ctl.grip !== undefined && ctl.hand) {
+      const j = drawFigure(measureBlank(), B.P, B.bx, B.by, B.scale);
+      const [hx, hy] = j.pts[0];
+      const [ex, ey] = j.pts[2];
+      const g = clamp(ctl.grip);
+      drawBlankHand(L.ctx, hx, hy, B.scale * 0.125, Math.atan2(hx - ex, hy - ey), ctl.still ? this.stillT : this.t, {
+        curl: g,
+        spread: lerp(1.7, 0.5, g),
+        alpha: ctl.alpha ?? 1,
+      });
+    }
     // 발끝부터 지워진다 (아래 composite 전에 레이어에서 잘라낸다)
     if (ctl?.erase && ctl.erase > 0) {
       L.ctx.save();

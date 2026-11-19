@@ -1101,8 +1101,11 @@ export class StoryScene implements Scene {
     ctx.fillStyle = '#050505';
     ctx.fillRect(-10, -10, s.W + 20, s.H + 20);
     const p = PAGES[this.page];
+    // 내레이션 글자 크기: 작은 화면(폰)에서는 키운다. 그만큼 그림 틀을 줄여 글이 화면 안에 들어오게
+    const size = Math.round(Math.min(32, s.W / 46) * Math.min(s.ui, 1.75));
+    const lh = size * 1.7;
     // 그림 틀
-    const fw = Math.min(s.W * 0.66, 1120);
+    const fw = Math.min(s.W * 0.66, 1120, (s.H * 0.92 - s.H * 0.08 - lh * 2.4 - 40) / 0.6);
     const fh = fw * 0.6;
     const fx = (s.W - fw) / 2;
     const fy = s.H * 0.08;
@@ -1127,12 +1130,10 @@ export class StoryScene implements Scene {
     ctx.lineWidth = 1;
     ctx.strokeRect(fx - 3, fy - 3, fw + 6, fh + 6);
     // 내레이션: 가운데 정렬, 글자가 하나씩 부드럽게 떠오른다
-    const size = Math.round(Math.min(32, s.W / 46));
     ctx.font = `500 ${size}px ${SERIF}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    const lh = size * 1.7;
-    const ty = fy + fh + Math.min(96, s.H * 0.11);
+    const ty = fy + fh + Math.min(96, s.H * 0.11, 30 + size * 1.4);
     let n = this.chars;
     p.lines.forEach((ln, li) => {
       const w = ctx.measureText(ln).width;

@@ -377,9 +377,10 @@ export function drawMemory(s: Screen, art: string, t: number, alpha: number) {
     ctx.save();
     ctx.globalAlpha = alpha * clamp((t - 3.8) / 0.6) * 0.7;
     ctx.fillStyle = '#bbb';
-    ctx.font = '400 20px "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
+    const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    ctx.font = `400 ${Math.round(20 * s.ui)}px "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText('아무 키나 눌러 닫기', s.W / 2, s.H - 50);
+    ctx.fillText(touch ? '화면을 눌러 닫기' : '아무 키나 눌러 닫기', s.W / 2, s.H - 50 * s.ui);
     ctx.restore();
   }
 }

@@ -5,6 +5,7 @@
  *  C. 꽃밭 한가운데: 꽃을 심는다 → 엔딩 판정대로 배드 / 노말 / 진.                         1500 ~ 3600
  *  왼쪽(x < 0)은 지나온 하얀 땅. 노말·진엔딩에서 여백은 그 경계에 서 있다.
  */
+import { app } from '../../app';
 import type { LevelDef, GameAPI, SolidDef, DecorDef, EntityDef, TriggerDef, BlankCtl, CamFocus } from '../types';
 import type { Co } from '../../core/co';
 import type { Player } from '../player';
@@ -457,10 +458,11 @@ function drawOverlay(ctx: CanvasRenderingContext2D, _g: GameAPI, W: number, H: n
     ctx.save();
     ctx.textAlign = 'center';
     ctx.globalAlpha = clamp(st.credits / 1.5) * clamp((16 - st.credits) / 1.5);
+    const u = Math.min(app.screen.ui, 1.6);
     lines.forEach((l, i) => {
       ctx.fillStyle = i === 0 ? '#0d0d0d' : '#2a2a28';
-      ctx.font = `${i === 0 ? 600 : 400} ${i === 0 ? 38 : 22}px ${KR}`;
-      ctx.fillText(l, W / 2, y0 + i * 46);
+      ctx.font = `${i === 0 ? 600 : 400} ${(i === 0 ? 38 : 22) * u}px ${KR}`;
+      ctx.fillText(l, W / 2, y0 + i * 46 * u);
     });
     ctx.restore();
   }
@@ -469,11 +471,12 @@ function drawOverlay(ctx: CanvasRenderingContext2D, _g: GameAPI, W: number, H: n
     ctx.globalAlpha = st.title;
     ctx.textAlign = 'center';
     ctx.fillStyle = '#0d0d0d';
-    ctx.font = `600 64px ${KR}`;
+    const u = Math.min(app.screen.ui, 1.5);
+    ctx.font = `600 ${64 * u}px ${KR}`;
     ctx.fillText('THE MONOCHROME', W / 2, H * 0.24);
-    ctx.font = `400 22px ${KR}`;
+    ctx.font = `400 ${22 * u}px ${KR}`;
     ctx.fillStyle = '#2a2a28';
-    ctx.fillText('더 모노크롬', W / 2, H * 0.24 + 44);
+    ctx.fillText('더 모노크롬', W / 2, H * 0.24 + 44 * u);
     drawFlower(ctx, W / 2, H * 0.24 + 120, 30, PETAL_COLORS, { stem: 1.2, sway: Math.sin(performance.now() / 900) * 0.06 });
     ctx.restore();
   }

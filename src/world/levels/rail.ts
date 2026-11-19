@@ -100,7 +100,7 @@ const triggers: TriggerDef[] = [
   { id: 'h_roof', x: 700, w: 100, once: true, hint: { kb: '칸 사이 사다리로 지붕에 오를 수 있다', dur: 3.5 } },
   { id: 'cp_r1', x: 1000, w: 60, checkpoint: true },
   { id: 'beams', x: 1060, w: 60, once: true, script: 'beams' },
-  { id: 'h_beam', x: 1900, w: 60, once: true, hint: { kb: '종소리와 오른쪽 신호등 = 철골이 온다  ·  지붕 위에서는 달리다 ↓ 로 굴러서 밑으로', touch: '종소리와 오른쪽 신호등 = 철골이 온다  ·  지붕 위에서는 달리다 ↓ 로 굴러서 밑으로', dur: 5 } },
+  { id: 'h_beam', x: 1900, w: 60, once: true, hint: { kb: '종소리와 오른쪽 신호등 = 철골이 온다  ·  지붕 위에서는 달리면서 {down} 로 굴러 밑으로', touch: '종소리와 오른쪽 신호등 = 철골이 온다  ·  지붕 위에서는 달리면서 굳기 버튼으로 굴러 밑으로', dur: 5 } },
   { id: 'cp_r2', x: 2960, w: 60, y: -120, h: 200, checkpoint: true },
   { id: 'tunnel', x: 3040, w: 60, once: true, script: 'tunnel' },
   { id: 'blank', x: 3700, w: 60, once: true, script: 'blank' },

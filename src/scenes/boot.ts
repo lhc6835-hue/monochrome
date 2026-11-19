@@ -45,6 +45,8 @@ export class BootScene implements Scene {
       if (this.readyT > 0.6) {
         if (params.has('skip') || params.has('x') || params.has('level')) app.setScene(new GameScene(params.has('continue') ? Save.load() : null, params.get('level') ?? undefined));
         else if (params.has('title')) app.setScene(new TitleScene(undefined, 4.1));
+        // 이어할 기록이 있으면 오프닝 이야기는 건너뛰고 바로 타이틀로
+        else if (Save.load() && !params.has('story')) app.setScene(new TitleScene(undefined, 0));
         else app.setScene(new StoryScene());
       }
     }

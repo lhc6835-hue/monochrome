@@ -20,6 +20,8 @@ export class Screen {
   pw = 0;
   ph = 0;
   private layers: Layer[] = [];
+  /** 렌더 해상도 배율: 기기가 버거워하면 자동으로 낮춘다 (1 → 0.8 → 0.65) */
+  quality = 1;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -29,7 +31,7 @@ export class Screen {
   }
 
   resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2) * this.quality;
     const cw = window.innerWidth;
     const ch = window.innerHeight;
     this.pw = Math.round(cw * dpr);
@@ -58,6 +60,16 @@ export class Screen {
     this.sizeLayer(l);
     this.layers.push(l);
     return l;
+  }
+
+  /**
+   * 글자·안내 UI 배율: 논리 해상도(높이 1080)를 작은 화면(폰)에 줄여 그리면 글자가 읽을 수 없게 작아진다.
+   * 실제 화면에서 글자가 일정 크기 아래로 내려가지 않도록 키우는 배율 (데스크톱 ≈ 1, 폰 ≈ 2).
+   */
+  get ui() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2) * this.quality;
+    const cssPerUnit = this.k / dpr;
+    return clamp(0.68 / cssPerUnit, 1, 2.1);
   }
 
   /** 논리 좌표계 변환 설정 */

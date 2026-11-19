@@ -31,6 +31,7 @@ interface GhostFrame {
   dt: number;
 }
 
+const PORTRAIT = window.matchMedia('(orientation: portrait) and (pointer: coarse)');
 type Mode = 'play' | 'dying' | 'memory' | 'paused' | 'ending' | 'transition';
 
 /** 구간을 넘어가도 이어지는 진행 상황 */
@@ -178,6 +179,7 @@ export class GameScene implements Scene, GameAPI {
   }
 
   enter() {
+    document.addEventListener('visibilitychange', this.onHide);
     app.input.setTouchVisible(true);
     audio.muffle(0);
     this.level.ambience();
@@ -216,7 +218,13 @@ export class GameScene implements Scene, GameAPI {
     this.fadeColor = '#000';
   }
 
+  /** 다른 앱·탭으로 나가면 돌아왔을 때 일시정지 상태로 */
+  private pauseReq = false;
+  private onHide = () => {
+    if (document.hidden) this.pauseReq = true;
+  };
   exit() {
+    document.removeEventListener('visibilitychange', this.onHide);
     app.input.setTouchVisible(false);
     this.pauseEl?.remove();
     audio.stopAllLoops(1.2);
@@ -592,7 +600,8 @@ export class GameScene implements Scene, GameAPI {
       }
       return;
     }
-    if (inp.pressed('pause') && this.mode === 'play') {
+    // 일시정지: 키, 또는 폰을 세로로 돌렸거나 다른 앱·탭으로 나갔을 때 (보이지 않는 사이에 죽지 않게)
+    if (this.mode === 'play' && (inp.pressed('pause') || this.pauseReq || PORTRAIT.matches)) {
       this.openPause();
       return;
     }
@@ -933,6 +942,7 @@ export class GameScene implements Scene, GameAPI {
   // 일시정지
   // ------------------------------------------------------------------
   private openPause() {
+    this.pauseReq = false;
     this.mode = 'paused';
     audio.muffle(0.8, 0.2);
     const el = document.createElement('div');
@@ -1781,9 +1791,11 @@ export class GameScene implements Scene, GameAPI {
     // 꽃잎 수
     const nearSavable = !!this.prompt && this.prompt.p.text.includes('꽃잎');
     const hudA = Math.max(clamp(this.hudT), nearSavable ? 1 : 0, app.input.down('interact') ? 0.6 : 0);
+    const ui = s.ui;
     if (hudA > 0.01) {
       ctx.save();
       ctx.globalAlpha = hudA;
+      ctx.scale(ui, ui);
       drawGlow(ctx, 78, 92, 70, this.petals, 0.8);
       drawFlower(ctx, 78, 130, 38, this.petals, { stem: 1.0, sway: Math.sin(this.t * 1.5) * 0.06 });
       ctx.fillStyle = '#1a1a1a';
@@ -1795,14 +1807,20 @@ export class GameScene implements Scene, GameAPI {
     // 상호작용 안내
     const pr = this.prompt;
     if (pr && this.mode === 'play') {
-      const [sx, sy] = this.cam.toScreen(s, pr.x, pr.y - 40);
+      const [sx, sy0] = this.cam.toScreen(s, pr.x, pr.y - 40);
       const key = app.input.touchMode ? '행동' : app.input.label('interact');
       ctx.save();
+      // 작은 화면에서는 안내 상자를 키운다 (아래쪽 끝을 기준으로, 화면 밖으로 나가지 않게)
+      const sy = Math.max(sy0, 60 * ui);
+      ctx.translate(sx, sy);
+      ctx.scale(ui, ui);
+      ctx.translate(-sx, -sy);
       ctx.font = `500 20px ${KR}`;
       const label = pr.p.text + (pr.p.hold > 0 ? '  (길게)' : '');
       const tw = ctx.measureText(label).width;
       const w = tw + (pr.p.disabled ? 32 : 74);
-      const x0 = sx - w / 2;
+      const half = s.W / 2 / ui;
+      const x0 = clamp(sx - w / 2, sx - half + 12, sx + half - w - 12);
       const y0 = sy - 24 - Math.sin(this.t * 3) * 3;
       ctx.globalAlpha = 0.88;
       ctx.fillStyle = '#0d0d0d';
@@ -1838,9 +1856,16 @@ export class GameScene implements Scene, GameAPI {
       const a = clamp(this.hintT / 0.5) * clamp((this.hintDur + 0.6 - this.hintT) / 0.6);
       ctx.save();
       ctx.globalAlpha = a;
-      ctx.font = `400 ${this.hintText.length <= 2 ? 64 : 25}px ${KR}`;
+      // 작은 화면에서는 글자를 키우되, 화면 폭을 넘지 않게
+      let fs = (this.hintText.length <= 2 ? 64 : 25) * ui;
+      ctx.font = `400 ${fs}px ${KR}`;
+      const hw = ctx.measureText(this.hintText).width;
+      if (hw > s.W * 0.92) {
+        fs *= (s.W * 0.92) / hw;
+        ctx.font = `400 ${fs}px ${KR}`;
+      }
       ctx.textAlign = 'center';
-      const y = this.hintText.length <= 2 ? s.H * 0.4 : s.H - 120;
+      const y = this.hintText.length <= 2 ? s.H * 0.4 : s.H - 120 - (ui - 1) * 60 - (app.input.touchMode ? 150 : 0);
       const g = ctx.createLinearGradient(0, y - 70, 0, y + 50);
       g.addColorStop(0, 'rgba(0,0,0,0)');
       g.addColorStop(0.5, 'rgba(0,0,0,0.35)');
@@ -1867,8 +1892,8 @@ export class GameScene implements Scene, GameAPI {
       if (a <= 0) return;
       ctx.globalAlpha = a;
       ctx.fillStyle = color;
-      ctx.font = `300 ${size}px ${KR}`;
-      ctx.fillText(txt, s.W / 2, y);
+      ctx.font = `300 ${size * Math.min(s.ui, 1.6)}px ${KR}`;
+      ctx.fillText(txt, s.W / 2, s.H / 2 + (y - s.H / 2) * Math.min(s.ui, 1.6) * 0.8 + (y - s.H / 2) * 0.2);
     };
     if (this.finale) {
       this.drawFinale(line, t);
@@ -1942,12 +1967,26 @@ export class GameScene implements Scene, GameAPI {
       s.composite(L);
       ctx.restore();
     }
-    const y0 = this.finale === 'bad' ? s.H * 0.5 : s.H * 0.36;
+    // 노말·진: 가운데에 꽃 한 송이 (진 엔딩은 하얀 꽃잎 하나가 섞인다 — 여백에게 건넨 꽃잎)
+    if (this.finale !== 'bad') {
+      const a = clamp((t - 0.4) / 2);
+      if (a > 0) {
+        ctx.save();
+        ctx.globalAlpha = a;
+        const cx = s.W / 2,
+          fy = s.H * 0.3;
+        const cols = this.finale === 'true' ? [...PETAL_COLORS, '#f4f3ef'] : [...PETAL_COLORS];
+        drawGlow(ctx, cx, fy - 30, 160, cols, 0.55 * a);
+        drawFlower(ctx, cx, fy, 34, cols, { stem: 1.1, sway: Math.sin(t * 1.2) * 0.05, bloom: ease.outCubic(a) });
+        ctx.restore();
+      }
+    }
+    const y0 = this.finale === 'bad' ? s.H * 0.5 : s.H * 0.46;
     line(title, y0, 1.0, 44, '#efefec');
     line(sub, y0 + 60, 2.6, 22);
     line(`깨운 이웃  ${this.saved.size} / ${savable}      찾은 기억  ${Math.min(this.memories.size, mems)} / ${mems}`, y0 + 130, 4.2, 18, '#8d8d8a');
     line('끝', y0 + 210, 5.6, 24, '#d8d8d5');
-    if (t > 8) line('아무 키나 누르면 타이틀로 돌아갑니다', s.H * 0.86, 8, 16, '#5a5a57');
+    if (t > 8) line(app.input.touchMode ? '화면을 누르면 타이틀로 돌아갑니다' : '아무 키나 누르면 타이틀로 돌아갑니다', s.H * 0.88, 8, 16, '#5a5a57');
     ctx.globalAlpha = 1;
   }
 

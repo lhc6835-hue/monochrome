@@ -116,6 +116,8 @@ export class Input {
     });
     window.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch') this.enableTouch();
+      // 화면 아무 곳이나 눌러도 '아무 키' (기억 그림 닫기, 엔딩 뒤 타이틀로 등)
+      this.anyPressedFlag = true;
     });
     window.addEventListener('touchstart', () => {
       this.enableTouch();

@@ -623,20 +623,25 @@ export function sideIK(p: Pose, limb: 'arm' | 'leg', i: 0 | 1, tx: number, ty: n
   let vx = tx - ox,
     vy = ty - oy;
   let d = Math.hypot(vx, vy);
+  // 부드러운 IK: 다 펴지기 직전부터 천천히 펴지게 한다.
+  // (끝까지 곧게 편 팔다리는 목표가 1px 만 움직여도 무릎·팔꿈치가 크게 꺾여 떨린다)
   const maxD = L1 + L2 - 1e-4;
-  if (d > maxD) {
-    vx *= maxD / d;
-    vy *= maxD / d;
-    d = maxD;
+  const soft = maxD * 0.06;
+  const dSoft = maxD - soft;
+  if (d > dSoft) {
+    const nd = dSoft + soft * (1 - Math.exp(-(d - dSoft) / soft));
+    vx *= nd / d;
+    vy *= nd / d;
+    d = nd;
   }
   d = Math.max(d, 1e-4);
   const base = Math.atan2(vy, vx);
   const A = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
   const c1 = base + A,
     c2 = base - A;
-  // 무릎: 앞쪽(f) 으로 / 팔꿈치: 아래쪽으로
-  const fw = (c: number) => f * Math.cos(c);
-  const up1 = arm ? (Math.sin(c1) >= Math.sin(c2) ? c1 : c2) : fw(c1) >= fw(c2) ? c1 : c2;
+  // 무릎은 언제나 앞쪽으로, 팔꿈치는 언제나 뒤쪽으로 접힌다.
+  // (목표 방향에 따라 매 프레임 고르면, 팔다리가 거의 곧게 펴진 순간 두 해가 번갈아 뽑혀 지지직 뒤집힌다)
+  const up1 = arm ? (f > 0 ? c1 : c2) : f > 0 ? c2 : c1;
   const ex = ox + Math.cos(up1) * L1,
     ey = oy + Math.sin(up1) * L1;
   const lo = Math.atan2(oy + vy - ey, ox + vx - ex);

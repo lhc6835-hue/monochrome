@@ -34,6 +34,10 @@ const STOP_T = 0.2;
 /** 꼭대기를 넘어가는 시간, 사다리 위에서 몸이 사다리 뒤로 물러난 거리 */
 const CLIMB_EXIT_T = 0.62;
 const CLIMB_BACK = 30;
+/** 서 있을 때 발에서 엉덩이까지 (그림 기준) */
+const HIP_PX = 0.42 * PH.SCALE;
+/** 사다리 반대편으로 돌아 들어가는 시간 */
+const CLIMB_CROSS_T = 0.26;
 /** 구르기: 발이 엉덩이 밑에 닿는 순간 (여기서 일어설 수 없으면 다시 한 바퀴) */
 const ROLL_REPEAT_AT = 0.7;
 const ROLL_REPEAT_TO = 0.12;
@@ -62,6 +66,9 @@ export class Player implements PlayerLike {
   private mantleT = 0;
   private mantleFrom: [number, number] = [0, 0];
   private mantleTo: [number, number] = [0, 0];
+  /** 짚은 모서리의 x, 오르는 데 걸리는 시간 */
+  private mantleEdge = 0;
+  private mantleDur = 0.4;
   /** 착지 흡수 동작 */
   private landT = 9;
   private landImpact = 0;
@@ -102,6 +109,13 @@ export class Player implements PlayerLike {
   private climbFrom: [number, number] = [0, 0];
   private climbTo: [number, number] = [0, 0];
   private climbEdge = 0;
+  /** 사다리를 잡을 때 몸이 사다리 반대편으로 돌아 들어가는 중 (0 = 아님) */
+  private climbCross = 0;
+  private climbCrossFrom = 0;
+  private climbCrossDir = 1;
+  /** 그릴 때만 쓰는 세로 어긋남 (낮은 턱에 올라설 때 몸이 툭 튀지 않게) */
+  private visY = 0;
+  private stepUpT = 9;
   private lastSolids: Solid[] = [];
   private fallStartY = 0;
   private idleT = 0;
@@ -204,6 +218,16 @@ export class Player implements PlayerLike {
       const M = Math.floor((L.bottom - L.top) / RUNG);
       b.vx = 0;
       b.vy = 0;
+      // 잡는 쪽이 반대편이면: 사다리 뒤로 두어 걸음 돌아 들어가 사다리를 마주 본다
+      if (this.climbCross > 0) {
+        this.climbCross += dt / CLIMB_CROSS_T;
+        const k = clamp(this.climbCross);
+        b.x = lerp(this.climbCrossFrom, L.x - this.climbFace * CLIMB_BACK, ease.inOutSine(k));
+        b.y = L.bottom - this.climbM * RUNG;
+        if (k >= 1) this.climbCross = 0;
+        this.animate(g, dt);
+        return;
+      }
       // 꼭대기 넘어가기 / 꼭대기에서 내려오기 (정해진 동작)
       if (this.climbExit !== 0) {
         this.climbExit += dt / CLIMB_EXIT_T;
@@ -299,6 +323,7 @@ export class Player implements PlayerLike {
           this.climbDir = 0;
           this.climbE = 0;
           this.climbFace = s;
+          this.climbCross = 0;
           this.climbM = this.climbTopM(L);
           this.beginLadderExit(L, b.x, b.y, -1);
           audio.play('clunk', { vol: 0.3, rate: 1.4 });
@@ -317,11 +342,27 @@ export class Player implements PlayerLike {
           this.climbE = 0;
           this.climbDir = 0;
           this.climbExit = 0;
-          // 꼭대기에서 올라설 곳이 한쪽뿐이면 그쪽을 보고 오른다
-          const l = !!this.ladderExit(L, -1, solids, true),
-            r = !!this.ladderExit(L, 1, solids, true);
-          this.climbFace = l && !r ? -1 : r && !l ? 1 : this.facing;
-          b.y = L.bottom - this.climbM * RUNG;
+          // 다가온 쪽에 그대로 붙어 오른다. 그쪽 기둥 자리가 막혀 있을 때만 (열차 지붕 밑 등)
+          // 사다리 뒤로 돌아 반대편으로 간다 — 예전처럼 몸이 사다리를 뚫고 순간이동하지 않게.
+          const own = Math.abs(dx) >= 12 ? Math.sign(dx) : -this.facing;
+          const free = (side: number) =>
+            areaFree({ x: L.x + side * CLIMB_BACK - 14, y: L.top - 40, w: 28, h: L.bottom - L.top + 40 - 6 }, solids);
+          const side = !free(own) && free(-own) ? -own : own;
+          this.climbFace = -side;
+          this.climbCross = 0;
+          if (side !== own) {
+            this.climbCross = 0.0001;
+            this.climbCrossFrom = b.x;
+            this.climbCrossDir = -own;
+            this.facing = -own;
+            this.blendFrom = clonePose(this.pose);
+            this.blendT = 0;
+            this.blendDur = 0.12;
+          }
+          // 공중에서 잡으면 가장 가까운 가로대로 몸이 붙는다: 그림은 부드럽게 따라간다
+          const ny = L.bottom - this.climbM * RUNG;
+          this.visY += b.y - ny;
+          b.y = ny;
           audio.play('clunk', { vol: 0.3, rate: 1.4 });
           this.animate(g, dt);
           return;
@@ -340,18 +381,21 @@ export class Player implements PlayerLike {
 
     // ---------- 마지막 턱 오르기 ----------
     if (this.state === 'mantle') {
-      this.mantleT += dt / 0.36;
+      const k0 = clamp(this.mantleT);
+      this.mantleT += dt / this.mantleDur;
       const k = clamp(this.mantleT);
-      const up = ease.outCubic(clamp(k / 0.65));
-      const over = ease.inOutQuad(clamp((k - 0.45) / 0.55));
-      b.x = lerp(this.mantleFrom[0], this.mantleTo[0], over);
-      b.y = lerp(this.mantleFrom[1], this.mantleTo[1], up);
+      const [hx, hy] = this.mantleHip(k);
+      b.x = hx;
+      b.y = hy + HIP_PX;
       b.vx = b.vy = 0;
+      // 무릎이 턱에 닿는 소리, 일어서며 디디는 소리
+      if (k0 < 0.5 && k >= 0.5) audio.play('thud', { vol: 0.16, rate: 1.5, vary: 0.1 });
+      if (k0 < 0.9 && k >= 0.9) audio.step(this.stepI++, 0.3);
       if (k >= 1) {
         this.state = 'normal';
+        b.x = this.mantleTo[0];
         b.y = this.mantleTo[1];
         b.onGround = true;
-        audio.play('land', { vol: 0.35, vary: 0.1 });
       }
       this.animate(g, dt);
       return;
@@ -571,6 +615,9 @@ export class Player implements PlayerLike {
         if (Math.abs((dir > 0 ? b.right : b.left) - side) > 2) continue;
         if (so.y >= b.y || so.y < b.y - 46) continue;
         if (!areaFree({ x: b.x - b.w / 2 + dir * 4, y: so.y - b.h - 1, w: b.w, h: b.h }, g.solids())) continue;
+        // 몸은 바로 올리되, 그림은 아래에서 부드럽게 따라 올라온다
+        this.visY += b.y - so.y;
+        this.stepUpT = 0;
         b.y = so.y;
         b.x += dir * 4;
         break;
@@ -594,10 +641,14 @@ export class Player implements PlayerLike {
         this.mantleT = 0;
         this.mantleFrom = [b.x, b.y];
         this.mantleTo = [tx, s.y];
+        this.mantleEdge = sideX;
+        // 높은 턱일수록 조금 더 걸린다
+        this.mantleDur = lerp(0.4, 0.52, clamp((b.y - s.y - 70) / 90));
         this.facing = dir;
-        audio.play('swish3', { vol: 0.3 });
+        // 손바닥이 턱을 탁 짚는 소리
+        audio.play('land', { vol: 0.2, rate: 1.7, vary: 0.1 });
+        audio.play('swish3', { vol: 0.18, rate: 1.1 });
         g.noise(b.x, b.y, 260);
-        audio.play('click4', { vol: 0.25 });
         break;
       }
     }
@@ -702,27 +753,28 @@ export class Player implements PlayerLike {
       g.noise(b.x, b.y, this.submerge > 0.03 ? 440 : metal ? 520 : 330);
     }
     this.landT += dt;
+    this.visY = damp(this.visY, 0, 20, dt);
+    if (Math.abs(this.visY) < 0.3) this.visY = 0;
+    this.stepUpT += dt;
     this.idleT = sp < 5 && b.onGround ? this.idleT + dt : 0;
     let key = 'ground';
 
-    if (this.state === 'climb' && this.ladder) {
+    if (this.state === 'climb' && this.ladder && this.climbCross > 0) {
+      // 사다리 뒤로 돌아 들어가기: 가던 쪽으로 두 걸음, 마지막에 사다리 쪽으로 돌아서며 손을 뻗는다
+      key = 'ground';
+      const k = clamp(this.climbCross);
+      const d = this.climbCrossDir;
+      this.phase += (dt * Math.PI) / CLIMB_CROSS_T;
+      applyRunCycle(P, this.phase, 0.55 * Math.sin(Math.PI * Math.min(1, k * 1.25)), d);
+      P.turn = k < 0.62 ? d : this.climbFace;
+      this.facing = P.turn;
+      this.turnC = P.turn;
+    } else if (this.state === 'climb' && this.ladder) {
       key = 'climb';
       this.climbPose(P, dt);
     } else if (this.state === 'mantle') {
       key = 'mantle';
-      const k = clamp(this.mantleT);
-      P.turn = this.facing;
-      const near = this.facing > 0 ? 0 : 1;
-      const far = 1 - near;
-      P.arms[near].a = lerp(2.6, 0.9, k);
-      P.arms[far].a = lerp(2.4, 0.7, k);
-      P.arms[near].b = P.arms[far].b = lerp(0.3, 1.2, k);
-      P.lean = lerp(0.2, 0.55, k);
-      P.legs[near].a = lerp(0.2, 1.4, Math.sin(k * Math.PI));
-      P.legs[near].b = lerp(0.3, 1.9, Math.sin(k * Math.PI));
-      P.legs[far].a = lerp(-0.2, 0.6, k);
-      P.legs[far].b = 0.6;
-      P.crouch = 0.04 * Math.sin(k * Math.PI);
+      this.mantlePose(P, clamp(this.mantleT));
     } else if (this.state === 'slide') {
       key = 'slide';
       // 실제 앞구르기 키프레임 (손 짚기 → 어깨 → 등 → 엉덩이 → 발)
@@ -822,6 +874,14 @@ export class Player implements PlayerLike {
     // 최근 달리던 속도 (멈출 때 한 번만 쓴다)
     this.lastSp = b.onGround ? Math.max(sp, this.lastSp - dt * 900) : 0;
     // 착지: 무릎이 굽었다가 천천히 펴진다 (발은 땅에 붙어 있다)
+    // 낮은 턱에 올라선 직후: 앞 무릎을 들어 디디고, 몸을 살짝 숙여 올라탄다
+    if (key === 'ground' && this.stepUpT < 0.22 && this.state === 'normal') {
+      const u = Math.sin(Math.PI * clamp(this.stepUpT / 0.22));
+      const ni = this.facing > 0 ? 0 : 1;
+      P.legs[ni].a += 0.55 * u;
+      P.legs[ni].b += 0.7 * u;
+      P.lean += 0.12 * u;
+    }
     if (key === 'ground' && this.landImpact > 0 && this.landT < 1) {
       const t = this.landT;
       const absorb = this.landImpact * (1 - Math.exp(-30 * t)) * Math.exp(-7 * t) * 2.3;
@@ -892,7 +952,7 @@ export class Player implements PlayerLike {
     // 정면(굳기 등)으로 돌아서면 꽃을 든 팔을 바로 내린다: 정면에서 가슴 앞으로 접힌 팔은 아이콘 같지 않다
     const tt = clamp(Math.abs(P.turn));
     const sideK = clamp((tt - 0.45) / 0.4);
-    this.holdK = damp(this.holdK, holdOk ? sideK : 0, holdOk ? 9 : this.state === 'freeze' ? 28 : 12, dt);
+    this.holdK = damp(this.holdK, holdOk ? sideK : 0, holdOk ? 9 : this.state === 'freeze' || key === 'mantle' ? 40 : 12, dt);
     if (this.holdK > 0.01) {
       const h = this.facing > 0 ? 0 : 1;
       const run = clamp(sp / PH.RUN);
@@ -907,6 +967,80 @@ export class Player implements PlayerLike {
     // 그릴 때는 정면 아니면 옆모습으로 (블렌드 중에도 비스듬한 각도가 나오지 않게)
     P.turn = Math.abs(P.turn) < 0.4 ? 0 : Math.sign(P.turn);
     this.pose = P;
+  }
+
+  /**
+   * 턱 오르기 동안 엉덩이가 지나는 길 (월드 좌표).
+   * 매달림(살짝 처짐) → 팔로 끌어올려 엉덩이가 턱 높이까지 → 앞으로 넘어가며 일어선다.
+   */
+  private mantleHip(k: number): [number, number] {
+    const [x0, y0] = this.mantleFrom;
+    const [x1, y1] = this.mantleTo;
+    const d = this.facing;
+    const hip0 = y0 - HIP_PX;
+    // 팔을 다 편 채 턱을 누르고 있을 때의 엉덩이 높이 (턱보다 살짝 아래)
+    const pressY = y1 + 6;
+    const dip = 5 * Math.sin(Math.PI * clamp(k / 0.16));
+    const pull = ease.inOutSine(clamp((k - 0.08) / 0.42));
+    const over = ease.inOutSine(clamp((k - 0.44) / 0.46));
+    const rise = ease.outSine(clamp((k - 0.5) / 0.5));
+    const x = lerp(x0 - d * 3 * pull, x1, over);
+    const y = lerp(lerp(hip0 + dip, pressY, pull), y1 - HIP_PX, rise);
+    return [x, y];
+  }
+
+  /** 턱 오르기 자세: 두 손으로 모서리를 짚고, 앞 무릎을 턱에 올린 뒤, 딛고 일어선다 */
+  private mantlePose(P: Pose, k: number) {
+    const b = this.body;
+    const S = PH.SCALE;
+    const d = this.facing;
+    const nI = (d > 0 ? 0 : 1) as 0 | 1;
+    const fI = (1 - nI) as 0 | 1;
+    const top = this.mantleTo[1];
+    const edge = this.mantleEdge;
+    const arm = (i: 0 | 1, x: number, y: number) => sideIK(P, 'arm', i, (x - b.x) / S, (y - b.y) / S);
+    const leg = (i: 0 | 1, x: number, y: number) => sideIK(P, 'leg', i, (x - b.x) / S, (y - 7.9 - b.y) / S);
+    P.turn = d;
+    // 몸통: 끌어올릴수록 가슴을 턱 위로 숙이고, 일어서며 편다
+    const press = Math.sin(Math.PI * clamp((k - 0.1) / 0.8));
+    P.lean = 0.12 + 0.42 * press;
+    P.headTilt = lerp(-0.35, 0.1, clamp(k / 0.5)) * (1 - clamp((k - 0.75) / 0.25));
+    P.crouch = 0;
+    // 손: 모서리 바로 안쪽을 짚는다 (앞손이 조금 더 멀리). 다 올라서면 떼어 몸 옆으로.
+    const release = ease.inOutSine(clamp((k - 0.7) / 0.22));
+    const handY = top - 2;
+    for (const i of [nI, fI]) {
+      const hx = edge + d * (i === nI ? 24 : 13);
+      const rx = b.x + d * (i === nI ? 4 : -4),
+        ry = b.y - 62;
+      arm(i, lerp(hx, rx, release), lerp(handY, ry, release));
+    }
+    // 앞발: 매달려 벽을 짚다가 → 무릎을 가슴까지 끌어올려 턱 위에 디딘다
+    const step = ease.inOutSine(clamp((k - 0.3) / 0.24));
+    const lift = Math.sin(Math.PI * step);
+    const wallX = edge - d * 2;
+    const hangY = b.y - 2;
+    const plantX = edge + d * 16;
+    const nfx = lerp(wallX, plantX, step) - d * 6 * lift;
+    const nfy = Math.min(lerp(hangY - 14, top, step) - 30 * lift, hangY);
+    // 몸이 디딘 발 위로 올라서면 발은 몸 밑으로 모인다
+    const gather = ease.inOutSine(clamp((k - 0.78) / 0.2));
+    leg(nI, lerp(nfx, b.x + d * 5, gather), lerp(nfy, b.y, gather));
+    // 뒷발: 벽을 밀다가, 몸이 넘어가면 따라 올라온다
+    const trail = ease.inOutSine(clamp((k - 0.58) / 0.3));
+    const tlift = Math.sin(Math.PI * trail);
+    const tfx = lerp(wallX - d * 4, b.x - d * 6, trail),
+      tfy = lerp(hangY + 4, b.y, trail) - 22 * tlift;
+    leg(fI, tfx, Math.min(tfy, b.y));
+    // 다 올라서면 평소 서 있는 자세로
+    const st = ease.inOutSine(clamp((k - 0.86) / 0.14));
+    if (st > 0) {
+      const I = rigidPose();
+      applyIdle(I, 0, d, 0);
+      I.turn = d;
+      lerpPose(P, I, st, P);
+    }
+    P.headY = 0;
   }
 
   /** 꼭대기 동작을 시작하는 칸: 허리가 꼭대기 높이에 닿는 곳 */
@@ -956,6 +1090,12 @@ export class Player implements PlayerLike {
     }
     this.climbExitDir = dir;
     this.climbExit = 0.0001;
+    // 오르던 자세에서 꼭대기 동작으로 이어지게 (같은 '사다리' 자세라 따로 섞어 준다)
+    if (dir > 0) {
+      this.blendFrom = clonePose(this.pose);
+      this.blendT = 0;
+      this.blendDur = 0.12;
+    }
     this.climbDir = 0;
     this.climbE = 0;
     audio.play('swish3', { vol: 0.22, rate: 1.1 });
@@ -1085,14 +1225,14 @@ export class Player implements PlayerLike {
         st.alpha = 1 - clamp((this.deathT - 0.5) / 0.6);
       }
     }
-    const hide = this.freezeAmt > 0.15 || this.hideFlower || this.state === 'climb';
+    const hide = this.freezeAmt > 0.15 || this.hideFlower || this.state === 'climb' || this.state === 'mantle';
     const fsize = 22;
     // 구르기: 엉덩이를 축으로 몸을 돌리고, 가장 낮은 점(손/어깨/등/발)을 바닥에 붙인다
     const rk = this.rollK,
       ra = this.rollAngle;
     const rolling = rk > 0.01 || Math.abs(ra) > 0.01;
     const fx = b.x + this.visX,
-      fy = b.y;
+      fy = b.y + this.visY;
     if (rolling) {
       const m = drawFigure(measureCtx(), this.pose, fx, fy, PH.SCALE, st);
       const [cx, cy] = m.hip;

@@ -36,6 +36,8 @@ const CLIMB_EXIT_T = 0.62;
 const CLIMB_BACK = 30;
 /** 서 있을 때 발에서 엉덩이까지 (그림 기준) */
 const HIP_PX = 0.42 * PH.SCALE;
+/** 턱 오르기: 앞발을 디디는 자리 (모서리에서 안쪽으로) */
+const MANTLE_PLANT = 6;
 /** 사다리 반대편으로 돌아 들어가는 시간 */
 const CLIMB_CROSS_T = 0.26;
 /** 구르기: 발이 엉덩이 밑에 닿는 순간 (여기서 일어설 수 없으면 다시 한 바퀴) */
@@ -389,8 +391,8 @@ export class Player implements PlayerLike {
       b.y = hy + HIP_PX;
       b.vx = b.vy = 0;
       // 무릎이 턱에 닿는 소리, 일어서며 디디는 소리
-      if (k0 < 0.5 && k >= 0.5) audio.play('thud', { vol: 0.16, rate: 1.5, vary: 0.1 });
-      if (k0 < 0.9 && k >= 0.9) audio.step(this.stepI++, 0.3);
+      if (k0 < 0.66 && k >= 0.66) audio.play('thud', { vol: 0.16, rate: 1.5, vary: 0.1 });
+      if (k0 < 0.93 && k >= 0.93) audio.step(this.stepI++, 0.3);
       if (k >= 1) {
         this.state = 'normal';
         b.x = this.mantleTo[0];
@@ -643,7 +645,7 @@ export class Player implements PlayerLike {
         this.mantleTo = [tx, s.y];
         this.mantleEdge = sideX;
         // 높은 턱일수록 조금 더 걸린다
-        this.mantleDur = lerp(0.4, 0.52, clamp((b.y - s.y - 70) / 90));
+        this.mantleDur = lerp(0.8, 0.95, clamp((b.y - s.y - 70) / 90));
         this.facing = dir;
         // 손바닥이 턱을 탁 짚는 소리
         audio.play('land', { vol: 0.2, rate: 1.7, vary: 0.1 });
@@ -977,18 +979,21 @@ export class Player implements PlayerLike {
     const [x0, y0] = this.mantleFrom;
     const [x1, y1] = this.mantleTo;
     const d = this.facing;
+    const edge = this.mantleEdge;
     const hip0 = y0 - HIP_PX;
-    // 팔을 다 편 채 턱을 누르고 있을 때의 엉덩이 높이 (턱보다 살짝 아래)
-    const pressY = y1 + 6;
-    const dip = 5 * Math.sin(Math.PI * clamp(k / 0.16));
-    const pull = ease.inOutSine(clamp((k - 0.08) / 0.32));
-    // 엉덩이는 먼저 턱 위에 디딘 앞발 위로 옮겨 가고 (한 발로 쪼그려 앉은 자세), 거기서 일어선다
-    const toFoot = ease.inOutSine(clamp((k - 0.5) / 0.26));
-    const settle = ease.inOutSine(clamp((k - 0.74) / 0.24));
-    const rise = ease.inOutSine(clamp((k - 0.4) / 0.52));
-    const footX = this.mantleEdge + d * 14;
-    const x = lerp(lerp(x0 - d * 3 * pull, footX, toFoot), x1, settle);
-    const y = lerp(lerp(hip0 + dip, pressY, pull), y1 - HIP_PX, rise);
+    const ws = (a: number, c: number) => ease.inOutSine(clamp((k - a) / (c - a)));
+    // ① 매달려 살짝 처졌다가 ② 팔을 당겨 가슴이 모서리까지
+    const dip = 5 * Math.sin(Math.PI * clamp(k / 0.14));
+    let x = x0 - d * 2 * ws(0.06, 0.38);
+    let y = lerp(hip0 + dip, y1 + 8, ws(0.06, 0.38));
+    // ③ 팔을 쭉 펴 어깨를 손 위로 보내고 상체를 턱 위로 깊이 숙인다 → 엉덩이가 턱보다 높이 뜬다
+    x = lerp(x, edge - d * 26, ws(0.36, 0.56));
+    y = lerp(y, y1 - 26, ws(0.36, 0.56));
+    // ④ 턱에 디딘 앞발 위로 엉덩이를 옮기며 ⑤ 밀어 일어선다
+    x = lerp(x, edge + d * MANTLE_PLANT, ws(0.62, 0.82));
+    y = lerp(y, y1 - 50, ws(0.6, 0.82));
+    x = lerp(x, x1, ws(0.8, 0.97));
+    y = lerp(y, y1 - HIP_PX, ws(0.8, 0.97));
     return [x, y];
   }
 
@@ -1003,54 +1008,50 @@ export class Player implements PlayerLike {
     const edge = this.mantleEdge;
     const arm = (i: 0 | 1, x: number, y: number) => sideIK(P, 'arm', i, (x - b.x) / S, (y - b.y) / S);
     const leg = (i: 0 | 1, x: number, y: number) => sideIK(P, 'leg', i, (x - b.x) / S, (y - 7.9 - b.y) / S);
+    const ws = (a: number, c: number) => ease.inOutSine(clamp((k - a) / (c - a)));
     P.turn = d;
-    // 몸통: 끌어올릴수록 가슴을 턱 위로 숙이고, 일어서며 편다
-    const press = Math.sin(Math.PI * clamp((k - 0.1) / 0.8));
-    P.lean = 0.12 + 0.42 * press;
-    P.headTilt = lerp(-0.35, 0.1, clamp(k / 0.5)) * (1 - clamp((k - 0.75) / 0.25));
+    // 몸통: 매달려 곧게 → 끌어올리며 가슴을 턱 위로 숙이고 → 일어서며 편다
+    P.lean = lerp(lerp(lerp(lerp(0.08, 0.35, ws(0.1, 0.38)), 1.0, ws(0.38, 0.56)), 0.5, ws(0.62, 0.82)), 0.04, ws(0.8, 0.97));
+    P.headTilt = lerp(-0.4, 0.15, ws(0.05, 0.5)) * (1 - ws(0.75, 1));
     P.crouch = 0;
-    // 손: 모서리 바로 안쪽을 짚는다 (앞손이 조금 더 멀리). 다 올라서면 떼어 몸 옆으로.
-    const release = ease.inOutSine(clamp((k - 0.7) / 0.22));
-    const handY = top - 2;
+    // 손: 모서리 바로 안쪽을 짚고 버티다가, 몸이 올라서면 떼어 몸 옆으로
+    const release = ws(0.7, 0.88);
     for (const i of [nI, fI]) {
-      const hx = edge + d * (i === nI ? 24 : 13);
-      const rx = b.x + d * (i === nI ? 4 : -4),
+      const hx = edge + d * (i === nI ? 22 : 12);
+      const rx = b.x + d * (i === nI ? 5 : -3),
         ry = b.y - 62;
-      arm(i, lerp(hx, rx, release), lerp(handY, ry, release));
+      arm(i, lerp(hx, rx, release), lerp(top - 2, ry, release));
     }
-    // 발이 턱보다 아래에 있는 동안은 벽 안으로 들어가지 않게
-    const outside = (x: number, y: number) => (y > top + 3 ? (d > 0 ? Math.min(x, edge - 6) : Math.max(x, edge + 6)) : x);
-    // 매달린 동안 두 다리는 몸 밑으로 늘어진다 (앞발 끝은 벽을 살짝 딛고 민다)
-    const hang = 1 - clamp((k - 0.1) / 0.3) * 0.25;
-    const scr = Math.sin(clamp(k / 0.4) * Math.PI * 2) * 3;
-    const dnX = b.x + d * (9 + scr),
-      dnY = b.y - 4 * hang;
-    const dfX = b.x - d * 3,
+    // 매달린 다리: 몸 밑으로 늘어진다 (앞발 끝은 벽을 살짝 딛는다, 벽 속으로는 들어가지 않게)
+    const wallX = (x: number) => (d > 0 ? Math.min(x, edge - 6) : Math.max(x, edge + 6));
+    const scr = Math.sin(clamp(k / 0.4) * Math.PI * 2) * 2.5;
+    const dnX = wallX(b.x + d * (8 + scr)),
+      dnY = b.y - 3;
+    const dfX = wallX(b.x - d * 3),
       dfY = b.y - 1;
-    // 앞발: 벽을 따라 무릎을 끌어올려 → 모서리를 넘겨 → 턱 위에 디딘다
-    const up = ease.inOutSine(clamp((k - 0.28) / 0.16));
-    const over = ease.inOutSine(clamp((k - 0.38) / 0.14));
-    const plantX = edge + d * 14;
-    let nfx = lerp(dnX, edge - d * 7, up),
-      nfy = lerp(dnY, top - 12, up);
-    nfx = lerp(nfx, plantX, over);
-    nfy = lerp(nfy, top, over);
-    // 몸이 디딘 발 위로 올라서면 발은 몸 밑으로 모인다
-    const gather = ease.inOutSine(clamp((k - 0.82) / 0.16));
+    // 앞발: 무릎을 앞으로 들어 벽 앞을 지나 (모서리 아래) → 모서리를 넘겨 턱 위에 디딘다
+    // (발을 엉덩이 바로 앞 높은 곳으로 끌어올리면 허벅지가 몸 뒤로 넘어간다)
+    const plantX = edge + d * MANTLE_PLANT;
+    const u1 = ws(0.44, 0.56),
+      u2 = ws(0.54, 0.67);
+    const w1x = edge - d * 6,
+      w1y = top + 8;
+    let nfx = lerp(lerp(dnX, w1x, u1), plantX, u2);
+    let nfy = lerp(lerp(dnY, w1y, u1), top, u2) - 8 * Math.sin(Math.PI * u2);
+    // 다 올라서면 발은 몸 밑으로 모인다
+    const gather = ws(0.86, 1);
     nfx = lerp(nfx, b.x + d * 5, gather);
-    nfy = lerp(nfy, Math.min(top, b.y), gather);
-    leg(nI, outside(nfx, nfy), nfy);
-    // 뒷발: 늘어져 있다가, 몸이 넘어가면 벽을 따라 올라와 턱 위로 따라 올라온다
-    // (엉덩이가 충분히 올라가기 전에 접어 올리면 무릎 꿇은 것처럼 보인다)
-    const tUp = ease.inOutSine(clamp((k - 0.68) / 0.14));
-    const tOver = ease.inOutSine(clamp((k - 0.8) / 0.16));
-    let tfx = lerp(dfX, edge - d * 8, tUp),
-      tfy = lerp(dfY, top - 10, tUp);
-    tfx = lerp(tfx, b.x - d * 7, tOver);
-    tfy = lerp(tfy, Math.min(top, b.y), tOver);
-    leg(fI, outside(tfx, tfy), Math.min(tfy, b.y));
+    nfy = lerp(nfy, top, gather);
+    leg(nI, nfx, nfy);
+    // 뒷발: 몸이 충분히 올라간 뒤에 (일찍 접으면 무릎 꿇은 것처럼 보인다)
+    // 모서리 아래까지 끌려 올라왔다가 → 턱 위로 넘어와 몸 밑에 딛는다
+    const t1 = ws(0.74, 0.86),
+      t2 = ws(0.84, 0.97);
+    const tfx = lerp(lerp(dfX, edge - d * 7, t1), b.x - d * 6, t2);
+    const tfy = lerp(lerp(dfY, top + 18, t1), top, t2) - 10 * Math.sin(Math.PI * t2);
+    leg(fI, tfx, Math.min(tfy, b.y));
     // 다 올라서면 평소 서 있는 자세로
-    const st = ease.inOutSine(clamp((k - 0.86) / 0.14));
+    const st = ws(0.9, 1);
     if (st > 0) {
       const I = rigidPose();
       applyIdle(I, 0, d, 0);

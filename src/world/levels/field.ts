@@ -612,7 +612,7 @@ function drawOverlay(ctx: CanvasRenderingContext2D, _g: GameAPI, W: number, H: n
     ctx.restore();
   }
   if (st.credits >= 0) {
-    const lines = ['THE MONOCHROME', '', '이야기 · 기획 · 개발', '— 함께 만든 이들 —', '', '효과음', 'OpenGameArt.org 의 CC0 소리들', '(rubberduck, qubodup, ogrebane, bart 외)', '', '아이콘', 'Maki · Material Design Icons · Material Symbols', '', '그리고', '이 세계의 모든 이웃에게', '', '', '봐 주어서 고마워요'];
+    const lines = ['THE MONOCHROME', '', '이야기 · 기획 · 개발', '— 함께 만든 이들 —', '', '효과음', 'OpenGameArt.org 의 CC0 소리들', '(rubberduck, qubodup, ogrebane, bart, railkill 외)', '', '아이콘', 'Maki · Material Design Icons · Material Symbols', '', '그리고', '이 세계의 모든 이웃에게', '', '', '봐 주어서 고마워요'];
     const y0 = H + 40 - st.credits * 70;
     ctx.save();
     ctx.textAlign = 'center';

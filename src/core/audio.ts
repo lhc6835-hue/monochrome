@@ -11,8 +11,12 @@ const SOUND_FILES = [
   'water_loop', 'mstep1', 'mstep2', 'mstep3', 'mstep4', 'machine', 'valve', 'rattle',
   'amb_factory', 'conveyor', 'machine_loop', 'alarm_loop', 'train_engine', 'whistle', 'hiss1', 'hiss2',
   'flip1', 'flip2', 'flip3', 'typewriter', 'squeak',
+  // 칼림바 한 음 (G4, OpenGameArt 'Kalimba Two-Notes' by railkill, CC0) — 주제 선율은 이 음의 높이를 바꿔 연주한다
+  'kalimba',
 ] as const;
 export type SoundName = (typeof SOUND_FILES)[number];
+/** 칼림바 표본의 실제 음높이 (G4 조금 높게) */
+const KALIMBA_HZ = 396.3;
 
 export interface PlayOpts {
   vol?: number;
@@ -74,6 +78,22 @@ export class Audio {
     this.lowpass.Q.value = 0.5;
     this.buses = { sfx: ctx.createGain(), amb: ctx.createGain(), music: ctx.createGain() };
     for (const b of Object.values(this.buses)) b.connect(this.lowpass);
+    // 음악에만 옅은 잔향 (방 안에서 울리는 것처럼): 짧은 되울림 + 높은 소리는 조금 깎는다
+    const echo = ctx.createDelay(1);
+    echo.delayTime.value = 0.21;
+    const fb = ctx.createGain();
+    fb.gain.value = 0.32;
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 2400;
+    const send = ctx.createGain();
+    send.gain.value = 0.38;
+    this.buses.music.connect(send);
+    send.connect(echo);
+    echo.connect(tone);
+    tone.connect(fb);
+    fb.connect(echo);
+    tone.connect(this.lowpass);
     this.lowpass.connect(this.master);
     this.master.connect(comp);
     comp.connect(ctx.destination);
@@ -152,85 +172,27 @@ export class Audio {
   static note(semi: number) {
     return 293.66 * Math.pow(2, semi / 12);
   }
-  /** 오르골 한 음: 맑은 바탕음 + 높은 배음, 빠르게 울리고 천천히 사라진다 */
+  /**
+   * 주제 선율의 한 음: 녹음된 칼림바 한 음(G4)의 높이를 바꿔 연주한다.
+   * semi 는 D4 기준 반음. 칼림바의 따뜻한 음역에 맞춰 한 옥타브 낮춰 탄다.
+   */
   musicBox(semi: number, o: { vol?: number; delay?: number; decay?: number; pan?: number } = {}) {
-    const ctx = this.ctx;
-    if (!ctx) return;
-    const f = Audio.note(semi);
-    const t0 = ctx.currentTime + (o.delay ?? 0);
-    const decay = o.decay ?? 2.4;
-    const out = ctx.createGain();
-    out.gain.value = 0;
-    let node: AudioNode = out;
-    if (o.pan) {
-      const p = ctx.createStereoPanner();
-      p.pan.value = Math.max(-1, Math.min(1, o.pan));
-      out.connect(p);
-      node = p;
-    }
-    node.connect(this.buses.music);
-    const v = o.vol ?? 0.22;
-    out.gain.setValueAtTime(0, t0);
-    out.gain.linearRampToValueAtTime(v, t0 + 0.006);
-    out.gain.exponentialRampToValueAtTime(0.0008, t0 + decay);
-    // 바탕음, 4배음(오르골 빗살), 살짝 어긋난 2배음
-    for (const [mul, amp, type] of [
-      [1, 1, 'sine'],
-      [2.005, 0.32, 'sine'],
-      [4.02, 0.12, 'sine'],
-      [1, 0.08, 'triangle'],
-    ] as const) {
-      const osc = ctx.createOscillator();
-      osc.type = type;
-      osc.frequency.value = f * mul;
-      const g = ctx.createGain();
-      g.gain.value = amp;
-      // 높은 배음은 더 빨리 사라진다
-      if (mul > 1.5) {
-        g.gain.setValueAtTime(amp, t0);
-        g.gain.exponentialRampToValueAtTime(0.0005, t0 + decay * 0.35);
-      }
-      osc.connect(g);
-      g.connect(out);
-      osc.start(t0);
-      osc.stop(t0 + decay + 0.1);
-    }
+    const rate = Audio.note(semi - 12) / KALIMBA_HZ;
+    this.play('kalimba', { rate, vol: (o.vol ?? 0.2) * 3.6, delay: o.delay, pan: o.pan, bus: 'music' });
   }
-  /** 부드럽게 부풀었다 가라앉는 화음 (현악 같은 바탕) */
+  /** 화음: 칼림바로 아래에서 위로 살짝 퉁기듯 (따로 끄는 소리 없이, 저절로 사라진다) */
   pad(semis: number[], o: { vol?: number; delay?: number; attack?: number; hold?: number; release?: number } = {}) {
-    const ctx = this.ctx;
-    if (!ctx) return;
-    const t0 = ctx.currentTime + (o.delay ?? 0);
-    const att = o.attack ?? 1.6,
-      hold = o.hold ?? 2,
-      rel = o.release ?? 3;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(500, t0);
-    lp.frequency.linearRampToValueAtTime(1900, t0 + att);
-    lp.frequency.linearRampToValueAtTime(700, t0 + att + hold + rel);
-    lp.Q.value = 0.4;
-    const out = ctx.createGain();
-    out.gain.setValueAtTime(0, t0);
-    out.gain.linearRampToValueAtTime(o.vol ?? 0.09, t0 + att);
-    out.gain.setValueAtTime(o.vol ?? 0.09, t0 + att + hold);
-    out.gain.linearRampToValueAtTime(0, t0 + att + hold + rel);
-    lp.connect(out);
-    out.connect(this.buses.music);
-    for (const semi of semis) {
-      for (const det of [-6, 5]) {
-        const osc = ctx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.value = Audio.note(semi);
-        osc.detune.value = det;
-        const g = ctx.createGain();
-        g.gain.value = 0.16 / semis.length;
-        osc.connect(g);
-        g.connect(lp);
-        osc.start(t0);
-        osc.stop(t0 + att + hold + rel + 0.1);
-      }
-    }
+    // 칼림바가 탁해지지 않는 음역(대략 G3 ~ D5)으로 옮겨 탄다
+    const notes = [...new Set(semis.map((n) => {
+      let m = n;
+      while (m < -7) m += 12;
+      while (m > 12) m -= 12;
+      return m;
+    }))].sort((a, b) => a - b);
+    notes.forEach((n, i) => {
+      const rate = Audio.note(n) / KALIMBA_HZ;
+      this.play('kalimba', { rate, vol: (o.vol ?? 0.09) * 4, delay: (o.delay ?? 0) + i * 0.07, pan: (i - (notes.length - 1) / 2) * 0.18, bus: 'music' });
+    });
   }
 
   /** 이름 붙은 루프. 같은 id가 이미 있으면 볼륨만 조정 */

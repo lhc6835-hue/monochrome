@@ -19,6 +19,7 @@
 | paper_rip, paper_crush | Various Paper Sound Effects | — |
 | elevator_door | old elevator door | sinny |
 | bell1~4 | Bell dings/chimes | — |
+| kalimba | Kalimba Two-Notes (두 번째 음 G4 하나만 잘라, 높이를 바꿔 주제 선율을 연주) | railkill |
 | chime, gong, door_*, slam, switch, weird1~2 | 100 CC0 SFX | rubberduck |
 | land, land_hard, thud, metal_fall, glass_break | 75 CC0 breaking / falling / hit sfx | rubberduck |
 | scrape, scrape2 | Scrapes | — |

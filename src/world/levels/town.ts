@@ -239,38 +239,70 @@ function* escape(g: GameAPI): Co {
   const ctl: BlankCtl = { bx, by: -20, lean: 0.3, crouch: 0, head: 0.1, hand: null };
   S.blankCtl = ctl;
   audio.muffle(0.55, 0.3);
+  // 팔은 어깨를 축으로 크게 휘두른다 (뒤 위로 치켜들었다가 → 머리 위를 지나 → 앞 아래로 내리꽂는다)
+  const ARM = 0.34 * 430;
+  let ang = 0.4,
+    rad = ARM * 0.8;
+  let missAng = 0.6,
+    missRad = ARM;
   while (t < 1.3) {
     const dt = S.dt;
     t += dt;
     // 느린 화면: 손이 덮쳐 오는 순간부터 빗나갈 때까지
     S.timeScale = t < 0.3 ? lerp(1, 0.2, ease.inOutSine(clamp((t - 0.16) / 0.14))) : t < 0.66 ? 0.2 : lerp(0.2, 1, ease.inOutSine(clamp((t - 0.66) / 0.22)));
-    // 여백이 구덩이 끝까지 덮쳐 오며 몸을 숙이고 웅크린다
-    // (서 있는 채로 가장자리까지 와서 상체를 크게 숙인다 — 팔 길이가 딱 정수리 위에서 모자라게)
-    ctl.bx = lerp(bx0, EDGE - 135, ease.outCubic(clamp(t / 0.35)));
-    ctl.crouch = 0;
-    ctl.lean = lerp(0.3, 0.62, ease.inOutSine(clamp((t - 0.2) / 0.3)));
-    ctl.head = lerp(0.1, 0.5, clamp(t / 0.5));
-    ctl.hand2 = [lerp(1.0, 0.6, clamp(t / 0.5)), 0.4];
+    // 몸: 구덩이 끝까지 덮쳐 오며 상체를 던지듯 숙이고 →
+    //     헛손질의 기세에 앞으로 쏠려 가장자리에서 휘청 → 겨우 버티고 선다
+    const lurch = ease.inOutSine(clamp((t - T_MISS) / 0.2)) * (1 - 0.6 * ease.inOutSine(clamp((t - 0.78) / 0.45)));
+    ctl.bx = lerp(bx0, EDGE - 185, ease.outCubic(clamp(t / 0.35))) + 34 * lurch;
+    ctl.crouch = 0.04 * lurch;
+    ctl.lean = lerp(0.3, 0.62, ease.inOutSine(clamp((t - 0.14) / 0.32))) + 0.3 * lurch + Math.sin(Math.max(0, t - 0.75) * 9) * 0.03 * clamp((t - 0.75) / 0.2) * (1 - clamp((t - 1.1) / 0.2));
+    ctl.head = lerp(0.1, 0.5, clamp(t / 0.5)) + 0.25 * lurch;
+    // 다른 팔: 손을 뻗는 동안 뒤로 젖혀 균형을 잡고, 휘청일 때 앞으로 허우적인다
+    const swing = ease.inOutSine(clamp((t - 0.2) / 0.3));
+    ctl.hand2 = [lerp(lerp(1.0, -0.45, swing), 0.5, lurch), lerp(0.4, 0.7, lurch)];
     S.chase.front = Math.min(ctl.bx + 90, EDGE);
-    // 손: 머리 위로 치켜들었다가 → 정수리를 향해 내리꽂고 → 땅 높이에서 막혀 허공을 움켜쥔다
-    const top: [number, number] = [b.x + 4, b.y - 140];
-    let target: [number, number];
-    if (t < 0.3) target = [lerp(ctl.bx + 150, ctl.bx + 10, t / 0.3), lerp(-380, -640, t / 0.3)];
-    else {
-      // 정수리를 향해 내리치지만 팔이 다 펴진 곳에서 멈추고, 몸은 그 아래로 빠져나간다
-      const k = clamp((t - 0.3) / (T_MISS - 0.3));
-      const gap = lerp(150, 6, ease.inQuad(k));
-      target = [top[0] + lerp(-120, 0, k), Math.min(top[1] - gap, 4)];
+    // 어깨 위치 (여백의 그림 비율: 엉덩이 0.42, 어깨는 엉덩이 위 0.311, 상체 기울기만큼 앞으로)
+    const sh: [number, number] = [ctl.bx + 134 * Math.sin(ctl.lean), ctl.by - 180.6 - 134 * Math.cos(ctl.lean)];
+    if (t < 0.24) {
+      // 예비 동작: 팔을 곧게 편 채 뒤 위로 크게 치켜든다 (팔꿈치가 얼굴 앞으로 접히지 않게)
+      const u = ease.inOutSine(clamp(t / 0.24));
+      ang = lerp(0.4, -2.05, u);
+      rad = lerp(ARM * 0.8, ARM * 1.3, u);
+    } else if (t < T_MISS) {
+      // 머리 위를 지나 앞으로 내리꽂으며, 뛰어내린 몸의 머리 바로 뒤를 노린다 (점점 빨라진다, 손끝 한 뼘 차이로 빗나간다)
+      const u = ease.inQuad(clamp((t - 0.24) / (T_MISS - 0.24)));
+      const back: [number, number] = [b.x - 44, b.y - 150];
+      const aim = Math.atan2(back[1] - sh[1], back[0] - sh[0]);
+      const dist = Math.min(Math.hypot(back[0] - sh[0], back[1] - sh[1]), ARM);
+      ang = lerp(-2.05, aim, u);
+      rad = lerp(ARM * 1.3, dist, ease.inQuad(u));
+      missAng = ang;
+      missRad = rad;
+    } else {
+      // 허공을 움켜쥔 주먹이 기세에 밀려 구덩이 쪽으로 더 내리꽂혔다가, 축 늘어진다
+      const f = ease.outCubic(clamp((t - T_MISS) / 0.32));
+      const hang = ease.inOutSine(clamp((t - 0.85) / 0.45));
+      ang = Math.min(missAng + 0.4 * f, 1.35) - 0.12 * hang;
+      rad = lerp(missRad, ARM, f);
     }
-    hand = [lerp(hand[0], target[0], 1 - Math.exp(-dt * 40)), lerp(hand[1], target[1], 1 - Math.exp(-dt * 40))];
+    const target: [number, number] = [sh[0] + Math.cos(ang) * rad, sh[1] + Math.sin(ang) * rad];
+    // 처음 몇 프레임만 쫓던 손에서 부드럽게 넘어오고, 그다음부터는 휘두르는 궤적을 그대로 따른다
+    const follow = t < 0.08 ? 20 : 60;
+    hand = [lerp(hand[0], target[0], 1 - Math.exp(-dt * follow)), lerp(hand[1], target[1], 1 - Math.exp(-dt * follow))];
     ctl.hand = hand;
     if (t > 0.3 && t - dt <= 0.3) audio.play('whoosh', { vol: 1, rate: 0.55 });
     if (!missed && t >= T_MISS) {
       missed = true;
+      // 손끝이 등을 스치고 허공을 움켜쥔다: 종이 부스러기가 주먹에서 터진다
       audio.play('paper_crush', { vol: 1, rate: 0.7 });
       audio.play('sting2', { vol: 0.8 });
-      S.parts.paper(hand[0], hand[1], 14, 1);
+      S.parts.paper(hand[0], hand[1], 16, 1.1);
       g.shake(0.3);
+    }
+    // 휘청이다 가장자리를 딛고 버티는 소리
+    if (t > 0.72 && t - dt <= 0.72) {
+      audio.play('thud', { vol: 0.6, rate: 0.55 });
+      S.parts.paper(EDGE - 10, -6, 8, 0.9);
     }
     // 카메라: 덮쳐 오는 순간 바짝 다가가고, 빗나간 뒤에는 물러나며 떨어지는 몸을 따라간다
     const close = t > 0.18 && t < 0.8;

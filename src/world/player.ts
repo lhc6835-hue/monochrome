@@ -126,6 +126,8 @@ export class Player implements PlayerLike {
   submerge = 0;
   /** 물 위에 떠서 헤엄치는 중 */
   swimming = false;
+  /** 굳어야 하는 곳 (술래 놀이 구역): 달리다 ↓ 를 눌러도 구르지 않고 굳는다 */
+  preferFreeze = false;
   /** 연출: 픽토그램으로 굳어 있게 한다 */
   forceFreeze = false;
   /** 꽃을 가슴 앞에 받쳐 든 정도 (0..1) */
@@ -351,9 +353,15 @@ export class Player implements PlayerLike {
     }
 
     // ---------- 굳기 ----------
-    if (this.state === 'normal' && b.onGround && downHeld && Math.abs(b.vx) < 90 && !this.grabbing) {
+    // (굳어야 하는 곳에서는 달리다 ↓ 를 눌러도 구르지 않고, 미끄러지듯 멈추며 바로 굳는다)
+    if (this.state === 'normal' && b.onGround && downHeld && (Math.abs(b.vx) < 90 || this.preferFreeze) && !this.grabbing) {
       this.freezeHold += dt;
-      if (this.freezeHold > 0.06) {
+      if (this.freezeHold > (this.preferFreeze ? 0.02 : 0.06)) {
+        if (Math.abs(b.vx) > 90) {
+          b.vx *= 0.25;
+          audio.play('land', { vol: 0.2, rate: 1.4 });
+          g.parts.puff(b.x, b.y, 4, 0.6);
+        }
         this.state = 'freeze';
         audio.play('click2', { vol: 0.5, rate: 0.75 });
         audio.play('click4', { vol: 0.35, rate: 0.6, delay: 0.08 });
@@ -377,7 +385,7 @@ export class Player implements PlayerLike {
     }
 
     // ---------- 구르기 (달리면서 ↓) ----------
-    if (this.state === 'normal' && b.onGround && control && inp.pressed('down') && ax !== 0 && Math.abs(b.vx) > 230) {
+    if (this.state === 'normal' && b.onGround && control && inp.pressed('down') && ax !== 0 && Math.abs(b.vx) > 230 && !this.preferFreeze) {
       this.state = 'slide';
       this.slideT = 0;
       this.rollT = 0;

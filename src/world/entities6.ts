@@ -156,7 +156,11 @@ const TEMPOS: number[][] = [
   [0.62, 0.62, 0.62, 0.62, 0.7, 0.62, 0.62, 0.62, 0.15, 0.15],
   [0.14, 0.14, 0.14, 0.14, 0.2, 0.5, 0.5, 0.5, 0.5, 0.5],
 ];
-const TURN = 0.42;
+/** 돌아보는 시간 (새 소리에 놀라 돌아볼 때는 먼저 흠칫하는 시간이 더 붙는다) */
+const TURN = 0.58;
+const STARTLE = 0.35;
+/** 다 돌아본 뒤 굳을 수 있는 여유 */
+const GRACE = 0.2;
 
 type SState = 'count' | 'turn' | 'look' | 'back' | 'caught' | 'found';
 
@@ -171,6 +175,10 @@ export class Seeker extends Entity {
   /** 돌아보는 정도 0..1 */
   private turnAmt = 0;
   private sweep = 0;
+  /** 글자를 셀 때마다 고개를 까딱하는 박자 (1 → 0) */
+  private beat = 0;
+  /** 새 소리에 놀라 돌아보는 중 */
+  private startled = false;
   constructor(public def: Extract<EntityDef, { type: 'seeker' }>) {
     super(def.id);
   }
@@ -194,6 +202,7 @@ export class Seeker extends Entity {
     // 놀이가 끝나기 전에는 술래 아이에게 꽃잎을 건넬 수 없다
     if (kid) kid.locked = this.state !== 'found';
     if (this.state === 'found') {
+      (g.player as unknown as { preferFreeze: boolean }).preferFreeze = false;
       this.turnAmt = Math.max(0, this.turnAmt - dt * 2);
       if (kid) kid.poseOverride = null;
       return;
@@ -205,6 +214,9 @@ export class Seeker extends Entity {
       this.finish(g);
       return;
     }
+    this.beat = Math.max(0, this.beat - dt * 4);
+    // 구역 안에서는 달리다 ↓ 를 눌러도 구르지 않고 굳는다
+    (p as unknown as { preferFreeze: boolean }).preferFreeze = this.inZone(g);
     const tempo = TEMPOS[this.cycle % TEMPOS.length];
     switch (this.state) {
       case 'count': {
@@ -213,6 +225,7 @@ export class Seeker extends Entity {
           this.alerted = false;
           this.state = 'turn';
           this.t = 0;
+          this.startled = true;
           this.lookDur = 1.8;
           if (Math.abs(p.x - this.def.x) < 2600) {
             audio.play('sting4', { vol: 0.7 });
@@ -223,29 +236,34 @@ export class Seeker extends Entity {
         if (this.syl < CHANT.length && this.t >= tempo[this.syl]) {
           this.t -= tempo[this.syl];
           this.syl++;
+          this.beat = 1;
           this.sing(g, this.syl - 1);
         }
         if (this.syl >= CHANT.length) {
           this.state = 'turn';
           this.t = 0;
+          this.startled = false;
           this.lookDur = 1.2 + hash1(this.cycle * 3.7) * 0.7;
         }
         break;
       }
-      case 'turn':
-        this.turnAmt = ease.inOutSine(clamp(this.t / TURN));
-        if (this.t >= TURN) {
+      case 'turn': {
+        // 놀랐을 때는 먼저 흠칫 멈췄다가 돌아본다
+        const pre = this.startled ? STARTLE : 0;
+        this.turnAmt = clamp((this.t - pre) / TURN);
+        if (this.t >= TURN + pre) {
           this.state = 'look';
           this.t = 0;
           this.sweep = 0;
           if (this.near(g)) audio.play('click5', { vol: 0.5, rate: 0.5 });
         }
         break;
+      }
       case 'look':
         this.turnAmt = 1;
         this.sweep += dt;
         // 굳지 않고 구역 안에 있으면 들킨다 (돌아본 직후 아주 짧은 여유)
-        if (this.sweep > 0.08 && this.inZone(g) && !p.frozen && !g.isDead()) {
+        if (this.sweep > GRACE && this.inZone(g) && !p.frozen && !g.isDead()) {
           this.state = 'caught';
           this.t = 0;
           audio.play('sting2', { vol: 0.9 });
@@ -259,8 +277,9 @@ export class Seeker extends Entity {
         }
         break;
       case 'back':
-        this.turnAmt = 1 - ease.inOutSine(clamp(this.t / 0.35));
-        if (this.t >= 0.5) {
+        this.turnAmt = 1 - clamp(this.t / 0.5);
+        if (this.t >= 0.62) {
+          this.startled = false;
           this.state = 'count';
           this.t = 0;
           this.syl = 0;
@@ -272,6 +291,7 @@ export class Seeker extends Entity {
         if (!g.isDead()) {
           // 다시 시작: 새로 센다
           this.state = 'count';
+          this.startled = false;
           this.t = -0.6;
           this.syl = 0;
           this.turnAmt = 0;
@@ -307,28 +327,53 @@ export class Seeker extends Entity {
     g.flags.add('seek:done');
   }
 
-  /** 술래 아이의 자세: 나무에 이마를 대고 두 팔로 눈을 가린다 → 돌아본다 */
-  pose(facing: number, t: number): Pose {
+  /**
+   * 술래 아이의 자세: 나무에 이마를 대고 두 팔로 눈을 가린다 → 돌아본다.
+   * 아이콘은 정면 아니면 옆모습뿐이라, 도는 동작을 단계로 나눈다:
+   *  ① 팔을 얼굴에서 내리며 고개를 든다 (나무를 본 채)  ② 정면을 거쳐  ③ 반대쪽(아이들 쪽)을 보고 선다
+   */
+  pose(_facing: number, t: number): Pose {
     const P = rigidPose();
     const k = this.turnAmt;
-    // 셀 때: 나무 쪽(오른쪽)을 보고 팔로 눈을 가림
-    P.turn = lerp(1, -1, k) * Math.abs(facing);
-    P.lean = lerp(0.22, -0.02, k);
-    P.headTilt = lerp(0.35, -0.1, k);
-    const nI = P.turn > 0 ? 0 : 1;
+    const back = this.state === 'back';
+    // 놀랐을 때: 흠칫 — 고개가 번쩍 들리고 몸이 굳는다 (아직 돌지 않음)
+    const pre = this.state === 'turn' && this.startled ? clamp(this.t / STARTLE) : this.state === 'turn' || this.state === 'look' || this.state === 'caught' ? 1 : 0;
+    // ① 팔 내리기·고개 들기 (돌아설 때는 앞쪽 40%, 되돌아갈 때는 뒤쪽 40% 에 팔을 다시 올린다)
+    const lower = back ? clamp((k - 0.15) / 0.45) : ease.inOutSine(clamp(k / 0.42));
+    // ② 정면 → ③ 반대쪽
+    const side = k < 0.46 ? 1 : k < 0.62 ? 0 : -1;
+    P.turn = side;
+    const nI = side >= 0 ? 0 : 1;
     const fI = 1 - nI;
-    P.arms[nI].a = lerp(2.5, 0.25, k);
-    P.arms[nI].b = lerp(2.4, 0.3, k);
-    P.arms[fI].a = lerp(2.3, 0.15, k);
-    P.arms[fI].b = lerp(2.5, 0.25, k);
+    // 셀 때: 나무에 이마를 기대고 두 팔을 굽혀 눈을 가린다
+    const cover = 1 - lower;
+    P.lean = 0.24 * cover + (side < 0 ? -0.03 : 0);
+    P.headTilt = 0.4 * cover - (side < 0 ? 0.12 : 0) - (this.startled && this.state === 'turn' ? 0.25 * pre * (1 - clamp(k * 3)) : 0);
+    if (side === 0) {
+      // 정면: 팔은 몸 옆에 곧게
+      P.arms[0].a = P.arms[1].a = 0.1;
+      P.arms[0].b = P.arms[1].b = 0.12;
+    } else {
+      P.arms[nI].a = lerp(0.22, 2.45, cover);
+      P.arms[nI].b = lerp(0.25, 2.35, cover);
+      P.arms[fI].a = lerp(0.1, 2.25, cover);
+      P.arms[fI].b = lerp(0.2, 2.45, cover);
+    }
     P.legs[0].a = 0.04;
     P.legs[1].a = -0.04;
-    // 셀 때 몸이 박자에 맞춰 살짝 흔들린다
-    if (this.state === 'count') P.headX = Math.sin(t * 5) * 0.004;
+    // 셀 때: 글자마다 고개를 까딱, 몸이 박자에 맞춰 살짝 들썩인다
+    if (this.state === 'count') {
+      P.headTilt += 0.1 * this.beat;
+      P.crouch = 0.012 * this.beat;
+      P.headX = Math.sin(t * 5) * 0.002;
+    }
+    // 돌아본 뒤: 아이들 쪽을 노려보며 고개를 아주 조금씩 움직인다
+    if (this.state === 'look') P.headTilt += Math.sin(t * 2.2) * 0.04;
     if (this.state === 'caught') {
       // 손가락으로 가리킨다
       P.arms[nI].a = 1.55;
       P.arms[nI].b = 0.05;
+      P.lean = -0.05;
     }
     return P;
   }
@@ -380,7 +425,8 @@ export class Seeker extends Entity {
     const fs = 54 / z;
     ctx.font = `600 ${fs}px "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif`;
     const gap = fs * 1.05;
-    const n = this.state === 'count' ? this.syl : CHANT.length;
+    // 새 소리에 놀라 세다 말았으면, 부른 데까지만
+    const n = this.state === 'count' || this.startled ? this.syl : CHANT.length;
     for (let i = 0; i < CHANT.length; i++) {
       const x = cx + (i - (CHANT.length - 1) / 2) * gap + (i >= 5 ? gap * 0.35 : -gap * 0.35);
       if (i < n) {
@@ -393,6 +439,14 @@ export class Seeker extends Entity {
         ctx.fillStyle = '#1a1a19';
         ctx.fillText('·', x, top);
       }
+    }
+    // 흠칫: 세다 말고 멈췄다 (곧 돌아본다)
+    if (this.state === 'turn' && this.startled && this.turnAmt < 0.3) {
+      const k = clamp(this.t / 0.12);
+      ctx.globalAlpha = k * (1 - clamp(this.turnAmt / 0.3));
+      ctx.font = `700 ${fs * 1.5}px "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif`;
+      ctx.fillStyle = '#0d0d0d';
+      ctx.fillText('!', cx, top + fs * 1.4 - (1 - k) * 10 / z);
     }
     // 돌아봤다
     if (this.state === 'turn' || this.state === 'look' || this.state === 'caught') {
@@ -411,6 +465,8 @@ export class Seeker extends Entity {
   load(s: unknown) {
     const f = (s as { found: boolean }).found;
     this.state = f ? 'found' : 'count';
+    this.startled = false;
+    this.beat = 0;
     this.t = 0;
     this.syl = 0;
     this.turnAmt = 0;

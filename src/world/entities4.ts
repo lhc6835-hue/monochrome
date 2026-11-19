@@ -250,9 +250,7 @@ export class Hazard extends Entity {
       ctx.fillStyle = INK;
       ctx.fillRect(x, -66, w, 106);
     } else if (kind === 'cliff') {
-      // 끊긴 다리: 선로가 허공에서 끝난다
-      ctx.fillStyle = '#c8c7c2';
-      ctx.fillRect(x, 40, w, 2000);
+      // 끊긴 다리: 선로가 허공에서 끝난다 (그 아래 협곡은 구간이 그린다)
       ctx.fillStyle = INK;
       ctx.beginPath();
       ctx.moveTo(x, 40);

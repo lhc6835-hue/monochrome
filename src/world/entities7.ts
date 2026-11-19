@@ -265,6 +265,8 @@ export class LitPlank extends Entity {
   private cells: { lit: number; k: number }[] = [];
   /** 굳은 칸들을 이어 붙인 발판들 */
   solidList: Solid[] | null = null;
+  /** 다른 빛이 그린 판자는 그 빛의 색 */
+  private tint: string | null = null;
   erase() {
     if (this.solidity <= 0 && this.erasedT > 0) return;
     this.solidity = 0;
@@ -306,6 +308,19 @@ export class LitPlank extends Entity {
     const cx = clamp(p.x, d.x, d.x + d.w);
     const cy = clamp(p.y - 70, d.y, d.y + (d.h ?? 22));
     lit = Math.hypot(cx - p.x, cy - (p.y - 70)) < r && !g.isDead();
+    // 다른 빛 (여백의 땅 마지막 다리: 깨운 이웃들이 비추는 색) — 그 빛의 색으로 그려진다
+    let tint: string | null = null;
+    for (const L of g.extraLights ?? []) {
+      const lx = clamp(L.x, d.x, d.x + d.w);
+      const ly = clamp(L.y, d.y, d.y + (d.h ?? 22));
+      if (Math.hypot(lx - L.x, ly - L.y) < L.r) {
+        lit = true;
+        tint = L.color;
+        break;
+      }
+    }
+    if (tint) this.tint = tint;
+    else if (this.solidity <= 0.01) this.tint = null;
     if (lit && this.erasedT <= 0) this.litT = d.hold ?? 0.6;
     else this.litT -= dt;
     const target = this.litT > 0 ? 1 : 0;
@@ -391,11 +406,16 @@ export class LitPlank extends Entity {
         }
       }
     } else if (this.solidity > 0.01) {
-      // 먹선으로 굳은 몸
+      // 먹선으로 굳은 몸 (이웃의 빛이 그린 판자는 그 사람의 색)
       const k = this.solidity;
       ctx.globalAlpha = k;
-      ctx.fillStyle = INK;
+      ctx.fillStyle = this.tint ?? INK;
       ctx.fillRect(d.x, d.y + (1 - k) * 4, d.w, h * (0.4 + 0.6 * k));
+      if (this.tint) {
+        ctx.globalAlpha = k * 0.85;
+        ctx.fillStyle = INK;
+        ctx.fillRect(d.x, d.y + (1 - k) * 4, d.w, 3);
+      }
       if (!sketch) {
         ctx.fillStyle = '#2b2b29';
         for (let x = d.x + 30; x < d.x + d.w - 10; x += 34) ctx.fillRect(x, d.y + 2, 3, h - 4);

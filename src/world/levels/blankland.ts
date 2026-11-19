@@ -17,11 +17,12 @@ import type { Gaze, Hands } from '../entities8';
 import { LEVELS } from './index';
 import { blankTheme } from '../../gfx/background';
 import { audio } from '../../core/audio';
-import { PETAL_COLORS, drawGlow, drawFlower } from '../../gfx/flower';
+import { PETAL_COLORS, drawGlow, drawFlower, drawPetal } from '../../gfx/flower';
 import { PAPER } from '../../gfx/blank';
 import { drawIcon, type IconName } from '../../gfx/icons';
-import { drawFigure, defaultStyle, rigidPose } from '../../gfx/figure';
-import { clamp, hash1, rand } from '../../core/math';
+import { drawFigure, defaultStyle, rigidPose, applyIdle } from '../../gfx/figure';
+import { clamp, ease, hash1, lerp, rand } from '../../core/math';
+import { CHORDS, MELODY, chordFor } from '../../core/theme';
 import { app } from '../../app';
 
 const pencil = (x0: number, x1: number, y = 0): SolidDef => ({ x: x0, y, w: x1 - x0, h: 3000, look: 'pencil' });
@@ -30,8 +31,11 @@ const flush = (id: string, x: number, w: number): EntityDef => ({ type: 'litplan
 /** 위에서만 밟는 스케치 판 */
 const sk = (id: string, x: number, y: number, w = 130): EntityDef => ({ type: 'litplank', id, x, y, w, by: 'flower' });
 
-const BOUNDARY = 13300;
-const DOT = { x: 13650, y: -260 };
+/** 마지막 다리: 땅이 끝나고 하얀 허공 위로 스케치 다리가 이어진다 */
+const BRIDGE_X0 = 13400;
+const BRIDGE_X1 = 15100;
+const BOUNDARY = 15400;
+const DOT = { x: BOUNDARY + 350, y: -260 };
 
 const solids: SolidDef[] = [
   { x: -1500, y: -3000, w: 1100, h: 6000, look: 'invisible' },
@@ -47,7 +51,8 @@ const solids: SolidDef[] = [
   // E
   pencil(9860, 10100),
   pencil(10270, 12900),
-  pencil(12900, BOUNDARY + 1200),
+  pencil(12900, BRIDGE_X0),
+  pencil(BRIDGE_X1, BOUNDARY + 1200),
   { x: BOUNDARY + 1200, y: -3000, w: 400, h: 6000, look: 'invisible' },
 ];
 
@@ -100,6 +105,8 @@ const entities: EntityDef[] = [
   sk('e3', 12960, -150, 120),
   sk('e4', 13130, -290, 120),
   { type: 'petal', id: 'b_p3', x: 13190, y: -370, color: PETAL_COLORS[6] },
+  // 마지막 다리 (하얀 허공 위, 빛이 닿아야 그려진다)
+  ...Array.from({ length: 12 }, (_, i): EntityDef => flush('br' + i, BRIDGE_X0 + (i * (BRIDGE_X1 - BRIDGE_X0)) / 12, (BRIDGE_X1 - BRIDGE_X0) / 12 + 1)),
 ];
 
 const triggers: TriggerDef[] = [
@@ -118,6 +125,7 @@ const triggers: TriggerDef[] = [
 // 스크립트
 // ------------------------------------------------------------------
 function* arrive(g: GameAPI): Co {
+  resetWitness();
   const S = g as unknown as { fadeColor: string; fadeA: number };
   S.fadeColor = PAPER;
   S.fadeA = 1;
@@ -178,7 +186,9 @@ function* boss(g: GameAPI): Co {
     if (gaze) gaze.active = false;
     if (g.isDead()) return;
   }
-  // ④ 색 한 점을 향해
+  // ④ 색 한 점을 향해 — 땅이 끝나고 하얀 허공. 깨운 이웃들이 하나씩 나타나 건넨 색으로 다리를 비춘다
+  resetWitness();
+  g.co.run(witness(g), 'witness');
   audio.play('sting1', { vol: 0.8 });
   if (!g.chaseActive()) startChase(-850, 300);
   else {
@@ -203,20 +213,173 @@ function* boundary(g: GameAPI): Co {
   audio.stopLoop('chasebed', 2.5);
   audio.stopLoop('heart', 3);
   audio.play('chime', { vol: 0.6, rate: 0.8 });
+  g.letterbox(true);
+  // 이웃들이 있었다면: 선율이 으뜸화음으로 닫히고, 모두가 손을 들어 배웅한다
+  if (wit.list.some((w) => w.t >= 0)) {
+    audio.pad(CHORDS[0], { vol: 0.09, attack: 0.9, hold: 2.6, release: 3.6 });
+    [12, 16, 19, 24].forEach((n, i) => audio.musicBox(n, { vol: 0.2, delay: 0.25 + i * 0.3, decay: i === 3 ? 4.5 : 2.6 }));
+    for (const w of wit.list) if (w.t >= 0) w.waveT = 0;
+  }
   const cam: CamFocus = { x: BOUNDARY + 100, y: -320, zoom: 0.8, smooth: 1.2 };
   S.camFocus = cam;
   let t = 0;
   S.cineFadeColor = '#000';
   while (S.cineFade < 1) {
     t += g.dt;
-    // 여백은 경계 바로 앞까지 와서 멈춘다
-    S.chase.front += (Math.min(BOUNDARY - 120, p.x - 200) - S.chase.front) * Math.min(1, g.dt * 1.5);
+    // 여백은 경계 바로 앞까지 와서 멈춘다 (이웃들이 있으면 그들 앞에 멈춰 있다)
+    if (!wit.list.some((w) => w.t >= 0)) S.chase.front += (Math.min(BOUNDARY - 120, p.x - 200) - S.chase.front) * Math.min(1, g.dt * 1.5);
     cam.x = BOUNDARY + 100 + t * 30;
     if (t > 3.2) S.cineFade = Math.min(1, S.cineFade + g.dt / 1.6);
     yield;
   }
+  wit.done = true;
   g.stopChase();
   g.goToLevel('field');
+}
+
+// ------------------------------------------------------------------
+// 건넨 색은 사라지지 않았다: 마지막 다리의 이웃들
+// ------------------------------------------------------------------
+interface Witness {
+  x: number;
+  /** 0 = 다리 위, 1 = 한 걸음 뒤 (많을 때) */
+  row: number;
+  scale: number;
+  head: number;
+  color: string;
+  /** 나타난 뒤 지난 시간 (-1 = 아직) */
+  t: number;
+  /** 손을 들어 배웅한 뒤 지난 시간 (-1 = 아직) */
+  waveT: number;
+  passed: boolean;
+}
+const wit = { list: [] as Witness[], queueT: 0, shown: 0, done: false };
+function resetWitness() {
+  wit.list = [];
+  wit.queueT = 0;
+  wit.shown = 0;
+  wit.done = false;
+}
+/** 지금까지 깨운 이웃들을, 깨운 순서대로 다리 위에 세운다 (누구에게 어떤 색을 건넸는지도 기억한다) */
+function buildWitness(g: GameAPI) {
+  const defs = new Map<string, Extract<EntityDef, { type: 'resident' }>>();
+  for (const lv of Object.values(LEVELS)) for (const d of lv.entities) if (d.type === 'resident') defs.set(d.id, d);
+  const ids = [...g.saved].filter((id) => defs.has(id));
+  const colorOf = (id: string) => {
+    for (const f of g.flags) if (f.startsWith('c:' + id + ':')) return f.slice(id.length + 3);
+    return PETAL_COLORS[Math.floor(hash1(id.length * 7.7 + id.charCodeAt(0)) * PETAL_COLORS.length) % PETAL_COLORS.length];
+  };
+  const n = ids.length;
+  const span = BRIDGE_X1 - BRIDGE_X0 - 260;
+  wit.list = ids.map((id, i) => {
+    const d = defs.get(id)!;
+    const kind = d.kind ?? 'adult';
+    const row = n > 14 ? i % 2 : 0;
+    return {
+      x: BRIDGE_X0 + 150 + (span * (i + 0.5)) / n,
+      row,
+      scale: (kind === 'child' ? 100 : kind === 'tall' ? 162 : 148) * (row ? 0.82 : 1),
+      head: kind === 'child' ? 1.3 : 1,
+      color: colorOf(id),
+      t: -1,
+      waveT: -1,
+      passed: false,
+    };
+  });
+}
+function* witness(g: GameAPI): Co {
+  const S = g as unknown as { chase: { max: number } };
+  buildWitness(g);
+  const n = wit.list.length;
+  const gap = n > 16 ? 0.19 : 0.3;
+  while (!wit.done) {
+    const p = g.player;
+    const dt = g.dt;
+    wit.queueT -= dt;
+    for (let i = 0; i < n; i++) {
+      const w = wit.list[i];
+      // 다가가면 하나씩, 깨운 순서대로 나타난다 (한 사람마다 선율이 한 음씩 이어진다)
+      if (w.t < 0 && wit.queueT <= 0 && p.x > w.x - 1100 && !g.isDead()) {
+        w.t = 0;
+        wit.queueT = gap;
+        const k = wit.shown++;
+        audio.musicBox(MELODY[k % MELODY.length] + 12, { vol: 0.2, decay: 2.6, pan: clamp((w.x - p.x) / 1400, -0.6, 0.6) });
+        if (k % 4 === 0) audio.pad(chordFor(k), { vol: 0.075, attack: 1.2, hold: gap * 4 + 0.6, release: 2.8 });
+        if (k === 0) {
+          // 처음 한 사람: 추격의 소리가 걷히고, 여백이 머뭇거린다
+          g.caption('건넨 색은, 사라지지 않았다.', 6, true);
+          audio.stopLoop('chasebed', 2.5);
+          audio.stopLoop('heart', 3);
+          audio.play('chime', { vol: 0.5, rate: 0.9 });
+          if (g.chaseActive()) S.chase.max = 205;
+        }
+      }
+      if (w.t >= 0) w.t += dt;
+      if (w.waveT >= 0) w.waveT += dt;
+      // 곁을 지날 때 손을 들어 준다
+      if (w.t > 0.5 && !w.passed && Math.abs(p.x - w.x) < 140) {
+        w.passed = true;
+        w.waveT = 0;
+      }
+    }
+    // 이웃들의 색이 스케치를 그린다
+    const shown = wit.list.filter((w) => w.t >= 0);
+    g.extraLights = shown.map((w) => ({ x: w.x, y: -80, r: 300 * ease.outCubic(clamp(w.t / 0.8)), color: w.color }));
+    // 여백은 색을 지우지 못한다: 이웃들 앞에서 멈춰 선다
+    if (shown.length && g.chaseActive()) {
+      const C = (g as unknown as { chase: { front: number } }).chase;
+      C.front = Math.min(C.front, shown[0].x - 190);
+    }
+    yield;
+  }
+  g.extraLights = [];
+}
+function drawWitnesses(ctx: CanvasRenderingContext2D, g: GameAPI) {
+  const shown = wit.list.filter((w) => w.t >= 0);
+  if (!shown.length) return;
+  const s = app.screen;
+  const p = g.player;
+  // 색의 빛 (몸 뒤)
+  for (const w of shown) {
+    const k = ease.outCubic(clamp(w.t / 0.9));
+    const cy = -w.scale * 0.62 - w.row * 34;
+    drawGlow(ctx, w.x, cy, 250 * k * (w.row ? 0.8 : 1), [w.color], 0.95 * k);
+  }
+  const L = app.fxLayer;
+  s.clearLayer(L);
+  g.cam.apply(L.ctx, s, 1);
+  for (const row of [1, 0]) {
+    for (const w of shown) {
+      if (w.row !== row) continue;
+      const k = ease.outCubic(clamp(w.t / 0.9));
+      const P = rigidPose();
+      // 다가오는 주인공을 보다가, 지나가면 그 뒷모습을 바라본다
+      const look = p.x < w.x - 40 ? -1 : 1;
+      P.turn = look;
+      applyIdle(P, g.t + w.x * 0.01, look, 1);
+      P.turn = look;
+      if (w.waveT >= 0 && w.waveT < 2.6) {
+        const a = clamp(w.waveT / 0.3) * clamp((2.6 - w.waveT) / 0.4);
+        const nI = look > 0 ? 0 : 1;
+        P.arms[nI].a = lerp(P.arms[nI].a, 2.6, a);
+        P.arms[nI].b = lerp(P.arms[nI].b, 0.3 + Math.sin(w.waveT * 11) * 0.3, a);
+      }
+      const st = defaultStyle();
+      st.color = row ? '#55554f' : '#2b2b29';
+      st.farColor = row ? '#6a6a64' : '#3c3c3a';
+      st.headScale = w.head;
+      st.alpha = k * (row ? 0.85 : 1);
+      drawFigure(L.ctx, P, w.x, -w.row * 34 + (1 - k) * 14, w.scale, st);
+    }
+  }
+  s.composite(L);
+  g.cam.apply(ctx, s, 1);
+  // 가슴의 꽃잎 (그 사람에게 건넨 색)
+  for (const w of shown) {
+    const k = ease.outCubic(clamp(w.t / 0.6));
+    const cy = -w.scale * 0.6 - w.row * 34 + (1 - k) * 14;
+    drawPetal(ctx, w.x, cy, (w.scale / 150) * 10, w.color, 0.3, k);
+  }
 }
 
 // ------------------------------------------------------------------
@@ -265,6 +428,8 @@ function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1
     s.composite(L, 0.55);
     g.cam.apply(ctx, s, 1);
   }
+  // 마지막 다리의 이웃들
+  if (wit.list.length && v.x1 > BRIDGE_X0 - 900 && v.x0 < BOUNDARY + 400) drawWitnesses(ctx, g);
   // E: 저 멀리 색 한 점 (가까워질수록 커진다)
   const dist = DOT.x - g.cam.x;
   if (v.x1 > 9000) {
@@ -314,6 +479,7 @@ export const blank: LevelDef = {
     { x0: 9300, x1: 11600, zoom: 0.86, lead: 300 },
     { x0: 11600, x1: 12600, zoom: 0.78, yOff: -160 },
     { x0: 12600, x1: BOUNDARY + 1500, zoom: 0.84, lead: 300 },
+    { x0: BRIDGE_X0 - 400, x1: BRIDGE_X1 + 100, zoom: 0.72, yOff: -70, lead: 280 },
   ],
   scripts: { arrive, boss, boundary },
   startScript: 'arrive',

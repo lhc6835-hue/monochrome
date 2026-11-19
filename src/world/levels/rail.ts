@@ -11,7 +11,7 @@ import { fieldTheme } from '../../gfx/background';
 import { audio } from '../../core/audio';
 import { PETAL_COLORS } from '../../gfx/flower';
 import { INK } from '../../gfx/ground';
-import { rand } from '../../core/math';
+import { ease, hash1, lerp, rand } from '../../core/math';
 import { Hazard, ROOF, CONTAINER_TOP } from '../entities4';
 import type { Player } from '../player';
 
@@ -221,14 +221,97 @@ function* end(g: GameAPI): Co {
   p.scriptTarget = FRONT - 40;
   p.scriptSpeed = 330;
   yield () => !!cliff && cliff.x < FRONT + 260;
-  // 뛰어오른다
-  p.state = 'normal';
+  // 뛰어오른다 (허공으로 계속 나아간다)
+  p.state = 'scripted';
+  p.scriptTarget = FRONT + 1600;
+  p.scriptSpeed = 420;
   p.body.vy = -1050;
   p.body.vx = 420;
   audio.play('swish2', { vol: 0.8 });
   audio.play('sting5', { vol: 0.6 });
-  yield 0.55;
+  g.letterbox(true);
+  // 꼭대기에 닿을 무렵: 시간이 멈춘 듯 느려지고, 끊긴 다리 아래의 아득한 협곡이 한눈에 들어온다
+  yield () => p.body.vy > -300;
+  audio.muffle(0.75, 0.6);
+  audio.play('whistle', { vol: 0.5, rate: 0.5 });
+  audio.loop('leapwind', 'amb_wind', 0.75, 0.8);
+  g.camFocus = { x: p.x + 420, y: 270, zoom: 0.42, smooth: 0.8 };
+  let t = 0;
+  while (t < 3.6) {
+    const rd = g.realDt;
+    t += rd;
+    g.timeScale = t < 0.5 ? lerp(1, 0.08, ease.outCubic(t / 0.5)) : t < 2.8 ? 0.08 : lerp(0.08, 1, (t - 2.8) / 0.8);
+    // 손에 든 꽃에서 꽃잎 빛이 흩날린다
+    if (Math.random() < rd * 22) {
+      const c = g.petals[Math.floor(Math.random() * g.petals.length)] ?? PETAL_COLORS[0];
+      g.parts.add({ t: 'spark', x: p.x + 20 + rand(-10, 10), y: p.y - 70 + rand(-10, 10), vx: rand(-320, -80), vy: rand(-160, 60), life: 3.2, size: rand(6, 11), color: c, drag: 0.12 });
+    }
+    // 심장이 두 번 뛴다
+    for (const at of [0.9, 1.8]) if (t >= at && t - rd < at) audio.play('thud', { vol: 0.55, rate: 0.55 });
+    yield;
+  }
+  g.timeScale = 1;
+  audio.stopLoop('leapwind', 1.8);
+  audio.muffle(0, 1.2);
   g.goToLevel('archive');
+}
+
+/** 끊긴 다리 아래: 아득한 협곡, 안개, 저 아래의 강, 너무 먼 건너편 */
+function drawGorge(ctx: CanvasRenderingContext2D, x: number, g: GameAPI, v: { x0: number; x1: number; y0: number; y1: number }) {
+  const bottom = Math.max(v.y1 + 200, 3200);
+  ctx.save();
+  // 허공 (위는 하늘과 같은 빛, 아래로 갈수록 짙은 안개)
+  const sky = ctx.createLinearGradient(0, 40, 0, bottom);
+  sky.addColorStop(0, '#cfceca');
+  sky.addColorStop(0.55, '#a9a8a3');
+  sky.addColorStop(1, '#6f6e6a');
+  ctx.fillStyle = sky;
+  ctx.fillRect(x, 40, v.x1 - x + 400, bottom);
+  // 너무 먼 건너편 절벽 (안개에 반쯤 지워졌다)
+  const far = x + 2600;
+  ctx.fillStyle = 'rgba(150,149,144,0.55)';
+  ctx.beginPath();
+  ctx.moveTo(far, 2600);
+  for (let y = 2600; y > 160; y -= 120) ctx.lineTo(far + 40 * hash1(y * 0.37) - 20 + (2600 - y) * 0.05, y);
+  ctx.lineTo(far + 2600, 160);
+  ctx.lineTo(far + 2600, 2600);
+  ctx.fill();
+  // 저 아래의 강
+  ctx.fillStyle = '#8b8a85';
+  ctx.fillRect(x, 1180, v.x1 - x + 400, 60);
+  ctx.strokeStyle = 'rgba(235,235,230,0.35)';
+  ctx.lineWidth = 3;
+  const travel = (g as unknown as { travel: number }).travel;
+  for (let i = 0; i < 40; i++) {
+    const xx = x + ((i * 173 - travel * 0.05) % 3000 + 3000) % 3000;
+    ctx.beginPath();
+    ctx.moveTo(xx, 1195 + (i % 3) * 14);
+    ctx.lineTo(xx + 90, 1195 + (i % 3) * 14);
+    ctx.stroke();
+  }
+  // 안개 띠
+  for (let i = 0; i < 4; i++) {
+    const y = 420 + i * 230;
+    const mg = ctx.createLinearGradient(0, y - 160, 0, y + 160);
+    mg.addColorStop(0, 'rgba(225,225,221,0)');
+    mg.addColorStop(0.5, `rgba(225,225,221,${0.35 - i * 0.05})`);
+    mg.addColorStop(1, 'rgba(225,225,221,0)');
+    ctx.fillStyle = mg;
+    ctx.fillRect(x - 200 + Math.sin(g.t * 0.2 + i) * 60, y - 160, v.x1 - x + 800, 320);
+  }
+  // 끊긴 다리 바로 아래로 떨어지는 절벽
+  ctx.fillStyle = '#2f2e2b';
+  ctx.beginPath();
+  ctx.moveTo(x + 6, 40);
+  let cx = x + 6;
+  for (let y = 40; y < bottom; y += 90) {
+    cx = x - 30 - (y - 40) * 0.08 + (hash1(y * 0.13) - 0.5) * 60;
+    ctx.lineTo(cx, y);
+  }
+  ctx.lineTo(x - 3000, bottom);
+  ctx.lineTo(x - 3000, 40);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1: number; y0: number; y1: number }) {
@@ -262,6 +345,9 @@ function drawBack(ctx: CanvasRenderingContext2D, g: GameAPI, v: { x0: number; x1
   for (let x = Math.floor(v.x0 / step) * step - off; x < v.x1 + step; x += step) ctx.fillRect(x, 86, 46, 12);
   ctx.fillStyle = INK;
   ctx.fillRect(v.x0 - 50, 80, v.x1 - v.x0 + 100, 8);
+  // 끊긴 다리 너머
+  const cliff = g.entity<Hazard>('cliff');
+  if (cliff && cliff.active && cliff.x < v.x1 + 200) drawGorge(ctx, cliff.x, g, v);
 }
 
 export const rail: LevelDef = {

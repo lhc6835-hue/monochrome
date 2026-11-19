@@ -200,6 +200,20 @@ export interface GameAPI {
   budPetal(): void;
   endSlice(): void;
   isDead(): boolean;
+  // ---- 연출 (명장면) ----
+  /** 느린 화면 배율 (1 = 보통) */
+  timeScale: number;
+  /** 느린 화면과 상관없는 실제 프레임 시간 */
+  realDt: number;
+  camFocus: CamFocus | null;
+  /** 영화처럼 위아래 검은 띠 */
+  letterbox(on: boolean): void;
+  /** 화면 아래의 한 줄 (이야기 글씨체) */
+  caption(text: string, dur?: number, ink?: boolean): void;
+  /** 색이 물결처럼 번져 나간다 (회색 세상에 잠깐 색이 든다) */
+  colorWave(x: number, y: number, o?: { dur?: number; r?: number }): void;
+  /** 꽃빛 말고도 스케치를 그리는 빛 (여백의 땅: 이웃들이 비추는 색) */
+  extraLights: { x: number; y: number; r: number; color: string }[];
 }
 
 /** 연출이 여백(거대한 흰 인물)을 직접 움직일 때 */

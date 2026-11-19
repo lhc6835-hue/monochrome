@@ -308,7 +308,15 @@ export class Resident extends Entity {
     this.state = 'waking';
     this.wakeT = 0;
     this.iris = color;
+    // 게임 전체에서 처음으로 누군가를 깨웠다: '처음 돌아온 색'
+    const first = g.saved.size === 0 && !g.flags.has('firstcolor');
     g.saved.add(this.id);
+    // 누구에게 어떤 색을 건넸는지 (여백의 땅 마지막 다리에서 그 색으로 돌아온다)
+    g.flags.add('c:' + this.id + ':' + color);
+    if (first) {
+      g.flags.add('firstcolor');
+      (g as unknown as { firstColor?: (e: Resident, c: string) => void }).firstColor?.(this, color);
+    }
     const hx = this.body.x,
       hy = this.body.y - this.scale * 0.9;
     g.parts.burst(hx, hy, [color, color, '#ffffff'], 22, 260);

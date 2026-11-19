@@ -1,5 +1,6 @@
 import { app, DEBUG, params, type Scene } from '../app';
 import { audio } from '../core/audio';
+import { chordFor, MOTIF } from '../core/theme';
 import { CoRunner } from '../core/co';
 import { clamp, damp, ease, lerp, mulberry32, rand, smoothDamp, TAU } from '../core/math';
 import { Save, type SaveData } from '../core/save';
@@ -110,6 +111,13 @@ export class GameScene implements Scene, GameAPI {
   cineFadeColor = '#000';
   /** 번개 (1 = 번쩍) */
   flash = 0;
+  /** 명장면 연출: 실제 프레임 시간, 위아래 검은 띠, 자막, 색의 물결, 스케치를 그리는 다른 빛 */
+  realDt = 1 / 60;
+  private bars = 0;
+  private barsT = 0;
+  private cap: { text: string; t: number; dur: number; ink: boolean } | null = null;
+  private waves: { x: number; y: number; t: number; dur: number; r: number }[] = [];
+  extraLights: { x: number; y: number; r: number; color: string }[] = [];
   trainSpeed = 0;
   /** 기록대 */
   recording = false;
@@ -387,6 +395,48 @@ export class GameScene implements Scene, GameAPI {
     this.control = on;
   }
   /** 꽃빛의 반지름 (굳어 있으면 꽃을 가슴에 숨겨 작아진다) */
+  letterbox(on: boolean) {
+    this.barsT = on ? 1 : 0;
+  }
+  /** ink: 밝은 곳(하얀 땅)에서는 먹색 글씨 */
+  caption(text: string, dur = 4.5, ink = false) {
+    this.cap = { text, t: 0, dur, ink };
+  }
+  colorWave(x: number, y: number, o: { dur?: number; r?: number } = {}) {
+    this.waves.push({ x, y, t: 0, dur: o.dur ?? 4.2, r: o.r ?? 2600 });
+  }
+  /** 처음으로 이웃을 깨웠을 때 (게임 전체에서 한 번) */
+  firstColor(e: Resident, color: string) {
+    const hx = e.body.x,
+      hy = e.body.y - e.scale * 0.62;
+    this.co.run(
+      (function* (g: GameScene) {
+        g.setControl(false);
+        g.letterbox(true);
+        const z0 = g.cam.zoom;
+        g.camFocus = { x: lerp(g.player.x, hx, 0.6), y: hy - 40, zoom: z0 * 1.28, smooth: 0.55 };
+        // 색이 가슴에서 퍼져 나간다
+        g.colorWave(hx, hy, { dur: 5.2, r: 3200 });
+        audio.pad(chordFor(0), { vol: 0.08, attack: 1.2, hold: 2.4, release: 3.2 });
+        MOTIF.forEach((n, i) => audio.musicBox(n + 12, { vol: 0.2, delay: 0.15 + i * 0.36 + (i === 4 ? 0.25 : 0), decay: i === 4 ? 3.6 : 2.2 }));
+        audio.play('chime', { vol: 0.35, rate: 0.8 });
+        void color;
+        // 시간이 거의 멈춘다
+        let t = 0;
+        while (t < 3.0) {
+          t += g.realDt;
+          g.timeScale = t < 0.3 ? lerp(1, 0.3, t / 0.3) : t < 2.3 ? 0.3 : lerp(0.3, 1, (t - 2.3) / 0.7);
+          if (t > 0.9 && t - g.realDt <= 0.9) g.caption('색은, 옮겨 갈 수 있었다.', 4.2);
+          yield;
+        }
+        g.timeScale = 1;
+        g.camFocus = null;
+        g.letterbox(false);
+        g.setControl(true);
+      })(this),
+      'firstcolor',
+    );
+  }
   lightRadius() {
     return this.player.freezeAmt > 0.5 ? 120 : 150 + this.petals.length * 45;
   }
@@ -536,6 +586,10 @@ export class GameScene implements Scene, GameAPI {
     this.cineFade = 0;
     this.cineFadeColor = '#000';
     this.flash = 0;
+    this.barsT = 0;
+    this.cap = null;
+    this.waves = [];
+    this.extraLights = [];
     this.chase.cine = false;
     this.flights = [];
     this.erased.clear();
@@ -608,6 +662,14 @@ export class GameScene implements Scene, GameAPI {
 
     // 느린 화면이어도 카메라는 실제 시간으로 움직인다
     const realDt = dt;
+    this.realDt = realDt;
+    this.bars += (this.barsT - this.bars) * (1 - Math.exp(-3.5 * realDt));
+    if (this.cap) {
+      this.cap.t += realDt;
+      if (this.cap.t > this.cap.dur + 1) this.cap = null;
+    }
+    for (const w of this.waves) w.t += realDt;
+    this.waves = this.waves.filter((w) => w.t < w.dur);
     dt *= this.timeScale;
     this.dt = dt;
     this.t += dt;
@@ -1096,6 +1158,7 @@ export class GameScene implements Scene, GameAPI {
 
     cam.apply(ctx, s, 1);
     this.parts.render(ctx);
+    if (this.waves.length) this.drawColorWaves();
 
     this.darkNow = damp(this.darkNow, Math.max(this.level.dark ?? 0, this.darkBoost), 6, dt);
     if (this.darkNow > 0.01) this.drawDarkness(this.darkNow * (1 - this.flash * 0.9));
@@ -1127,6 +1190,7 @@ export class GameScene implements Scene, GameAPI {
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s.W, s.H);
     }
+    this.drawCinema();
     this.drawHUD();
 
     // 죽음 연출
@@ -1784,6 +1848,76 @@ export class GameScene implements Scene, GameAPI {
     }
   }
 
+  /** 색의 물결: 회색 세상의 밝기는 그대로 두고, 색만 입힌다 (합성 'color') */
+  private drawColorWaves() {
+    const s = app.screen;
+    const L = app.fxLayer;
+    for (const w of this.waves) {
+      const u = clamp(w.t / w.dur);
+      const r = 60 + w.r * ease.outCubic(clamp(u / 0.72));
+      const a = 1 - ease.inQuad(clamp((u - 0.45) / 0.55));
+      if (a <= 0.01) continue;
+      s.clearLayer(L);
+      this.cam.apply(L.ctx, s, 1);
+      const c = L.ctx;
+      c.save();
+      // 무지개 (꽃잎 색들이 빙 둘러선다)
+      const cc = c as CanvasRenderingContext2D & { createConicGradient?: (a: number, x: number, y: number) => CanvasGradient };
+      if (cc.createConicGradient) {
+        const cg = cc.createConicGradient(w.t * 0.5, w.x, w.y);
+        PETAL_COLORS.forEach((col, i) => cg.addColorStop(i / PETAL_COLORS.length, col));
+        cg.addColorStop(1, PETAL_COLORS[0]);
+        c.fillStyle = cg;
+      } else c.fillStyle = PETAL_COLORS[Math.floor(w.t * 2) % PETAL_COLORS.length];
+      c.beginPath();
+      c.arc(w.x, w.y, r, 0, TAU);
+      c.fill();
+      // 물결 모양: 앞머리가 가장 진하고, 지나간 자리에 옅게 남았다가 사라진다
+      c.globalCompositeOperation = 'destination-in';
+      const rg = c.createRadialGradient(w.x, w.y, 0, w.x, w.y, r);
+      rg.addColorStop(0, `rgba(0,0,0,${0.5 * a})`);
+      rg.addColorStop(Math.max(0, 1 - 520 / r), `rgba(0,0,0,${0.55 * a})`);
+      rg.addColorStop(Math.max(0, 1 - 150 / r), `rgba(0,0,0,${0.95 * a})`);
+      rg.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = rg;
+      c.fillRect(w.x - r, w.y - r, r * 2, r * 2);
+      c.restore();
+      s.composite(L, 0.9, 'color');
+      // 물결 앞머리의 옅은 빛
+      s.composite(L, 0.12 * a, 'screen');
+    }
+    this.cam.apply(s.ctx, s, 1);
+  }
+  /** 위아래 검은 띠와 자막 (화면 좌표) */
+  private drawCinema() {
+    const s = app.screen;
+    const ctx = s.ctx;
+    if (this.bars < 0.005 && !this.cap) return;
+    s.base(ctx);
+    const bh = s.H * 0.105 * ease.inOutSine(clamp(this.bars));
+    if (bh > 0.5) {
+      ctx.fillStyle = '#050505';
+      ctx.fillRect(-20, -20, s.W + 40, bh + 20);
+      ctx.fillRect(-20, s.H - bh, s.W + 40, bh + 20);
+    }
+    const c = this.cap;
+    if (c) {
+      const a = clamp(c.t / 0.9) * clamp((c.dur + 1 - c.t) / 1);
+      const size = Math.round(Math.min(34, s.W / 44) * Math.min(s.ui, 1.7));
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.font = `500 ${size}px "Noto Serif KR", "Noto Serif CJK KR", "Nanum Myeongjo", "AppleMyungjo", "Batang", serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const ink = c.ink && bh < s.H * 0.05;
+      ctx.fillStyle = ink ? '#2a2a28' : '#ecece9';
+      ctx.shadowColor = ink ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.7)';
+      ctx.shadowBlur = ink ? 14 : 10;
+      const y = bh > 4 ? s.H - bh / 2 : s.H * 0.86;
+      ctx.fillText(c.text, s.W / 2, y + (1 - clamp(c.t / 0.9)) * 6);
+      ctx.restore();
+    }
+  }
   private drawHUD() {
     const s = app.screen;
     const ctx = s.ctx;
@@ -1792,7 +1926,7 @@ export class GameScene implements Scene, GameAPI {
     const nearSavable = !!this.prompt && this.prompt.p.text.includes('꽃잎');
     const hudA = Math.max(clamp(this.hudT), nearSavable ? 1 : 0, app.input.down('interact') ? 0.6 : 0);
     const ui = s.ui;
-    if (hudA > 0.01) {
+    if (hudA > 0.01 && this.bars < 0.3) {
       ctx.save();
       ctx.globalAlpha = hudA;
       ctx.scale(ui, ui);
@@ -1806,7 +1940,7 @@ export class GameScene implements Scene, GameAPI {
     }
     // 상호작용 안내
     const pr = this.prompt;
-    if (pr && this.mode === 'play') {
+    if (pr && this.mode === 'play' && this.bars < 0.3) {
       const [sx, sy0] = this.cam.toScreen(s, pr.x, pr.y - 40);
       const key = app.input.touchMode ? '행동' : app.input.label('interact');
       ctx.save();
@@ -1852,7 +1986,7 @@ export class GameScene implements Scene, GameAPI {
       ctx.restore();
     }
     // 힌트
-    if (this.hintText && this.hintT < this.hintDur + 0.6) {
+    if (this.hintText && this.hintT < this.hintDur + 0.6 && this.bars < 0.3) {
       const a = clamp(this.hintT / 0.5) * clamp((this.hintDur + 0.6 - this.hintT) / 0.6);
       ctx.save();
       ctx.globalAlpha = a;

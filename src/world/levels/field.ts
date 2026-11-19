@@ -13,6 +13,7 @@ import type { Resident, Memory } from '../entities';
 import { LEVELS, LEVEL_ORDER } from './index';
 import { meadowTheme } from '../../gfx/background';
 import { audio } from '../../core/audio';
+import { CHORDS, MELODY, MOTIF, chordFor } from '../../core/theme';
 import { PETAL_COLORS, STEM, drawFlower, drawGlow } from '../../gfx/flower';
 import { PAPER } from '../../gfx/blank';
 import { clamp, ease, hash1, lerp, rand } from '../../core/math';
@@ -167,6 +168,9 @@ function* plant(g: GameAPI): Co {
       p.facing = f;
       yield 1.1;
     }
+    // 처음 돌아온 색의 선율이 세 음에서 멈춘다 (다음 음은 오지 않는다)
+    [0, 4, 7].forEach((n, i) => audio.musicBox(n + 12, { vol: 0.16, delay: i * 0.7, decay: 3.2 }));
+    yield 2.6;
     // 꽃잎이 하나씩 바랜다
     for (let i = g.petals.length - 1; i >= 0; i--) {
       g.petals[i] = '#9e9e9a';
@@ -189,9 +193,12 @@ function* plant(g: GameAPI): Co {
     return;
   }
 
-  // 꽃을 심은 자리부터 색이 번진다
+  // 꽃을 심은 자리부터 색이 번진다 — 주제 선율의 첫 소절
   audio.play('chime', { vol: 0.6, rate: 0.8 });
   audio.play('bell3', { vol: 0.4, rate: 0.7, delay: 0.4 });
+  audio.pad(chordFor(0), { vol: 0.08, attack: 1.6, hold: 1.4, release: 2.4 });
+  audio.pad(chordFor(4), { vol: 0.08, attack: 1.2, hold: 1.4, release: 3, delay: 2.6 });
+  MELODY.slice(0, 8).forEach((n, i) => audio.musicBox(n + 12, { vol: 0.18, delay: 0.5 + i * 0.5, decay: i === 7 ? 3.6 : 2.4 }));
   let t = 0;
   while (t < 4) {
     t += g.dt;
@@ -289,6 +296,9 @@ function* giveLast(g: GameAPI): Co {
   }
   audio.stopLoop('heart', 3);
   audio.play('chime', { vol: 0.7 });
+  // 처음 돌아온 색의 다섯 음이, 여백의 가슴에서 다시 울린다
+  audio.pad(chordFor(4), { vol: 0.08, attack: 1.4, hold: 2.2, release: 2.6 });
+  MOTIF.forEach((n, i) => audio.musicBox(n + 12, { vol: 0.2, delay: 0.3 + i * 0.55 + (i === 4 ? 0.3 : 0), decay: i === 4 ? 4 : 2.6 }));
   // 가슴에 색이 차오르고, 끓던 윤곽이 멈춘다
   ctl.still = true;
   t = 0;
@@ -308,9 +318,13 @@ function* giveLast(g: GameAPI): Co {
     yield;
   }
   yield 0.6;
-  // 꽃잎으로 흩어지며 하얀 땅이 꽃밭이 된다
+  // 꽃잎으로 흩어지며 하얀 땅이 꽃밭이 된다 — 선율이 으뜸화음으로 닫힌다
   audio.play('bell2', { vol: 0.7, rate: 0.8 });
   audio.play('bell4', { vol: 0.5, rate: 1.1, delay: 0.3 });
+  audio.pad(CHORDS[2], { vol: 0.08, attack: 0.8, hold: 0.6, release: 1.2 });
+  audio.pad(CHORDS[3], { vol: 0.08, attack: 0.8, hold: 0.6, release: 1.2, delay: 1.2 });
+  audio.pad(CHORDS[0], { vol: 0.1, attack: 1, hold: 3, release: 4, delay: 2.4 });
+  [12, 16, 19, 24].forEach((n, i) => audio.musicBox(n, { vol: 0.2, delay: 2.5 + i * 0.32, decay: i === 3 ? 5 : 2.8 }));
   g.parts.burst(cx, cy, PETAL_COLORS, 90, 700);
   g.parts.ring(cx, cy, PETAL_COLORS[2], 600, 1.6);
   t = 0;

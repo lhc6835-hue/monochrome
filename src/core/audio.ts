@@ -145,6 +145,94 @@ export class Audio {
     return src;
   }
 
+  // ------------------------------------------------------------------
+  // 합성 음악: 명장면에서만 쓰는 오르골 음과 부드러운 화음 (음원 없이 코드로)
+  // ------------------------------------------------------------------
+  /** 반음 → 주파수 (0 = 라 바로 위 레, D4) */
+  static note(semi: number) {
+    return 293.66 * Math.pow(2, semi / 12);
+  }
+  /** 오르골 한 음: 맑은 바탕음 + 높은 배음, 빠르게 울리고 천천히 사라진다 */
+  musicBox(semi: number, o: { vol?: number; delay?: number; decay?: number; pan?: number } = {}) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const f = Audio.note(semi);
+    const t0 = ctx.currentTime + (o.delay ?? 0);
+    const decay = o.decay ?? 2.4;
+    const out = ctx.createGain();
+    out.gain.value = 0;
+    let node: AudioNode = out;
+    if (o.pan) {
+      const p = ctx.createStereoPanner();
+      p.pan.value = Math.max(-1, Math.min(1, o.pan));
+      out.connect(p);
+      node = p;
+    }
+    node.connect(this.buses.music);
+    const v = o.vol ?? 0.22;
+    out.gain.setValueAtTime(0, t0);
+    out.gain.linearRampToValueAtTime(v, t0 + 0.006);
+    out.gain.exponentialRampToValueAtTime(0.0008, t0 + decay);
+    // 바탕음, 4배음(오르골 빗살), 살짝 어긋난 2배음
+    for (const [mul, amp, type] of [
+      [1, 1, 'sine'],
+      [2.005, 0.32, 'sine'],
+      [4.02, 0.12, 'sine'],
+      [1, 0.08, 'triangle'],
+    ] as const) {
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.value = f * mul;
+      const g = ctx.createGain();
+      g.gain.value = amp;
+      // 높은 배음은 더 빨리 사라진다
+      if (mul > 1.5) {
+        g.gain.setValueAtTime(amp, t0);
+        g.gain.exponentialRampToValueAtTime(0.0005, t0 + decay * 0.35);
+      }
+      osc.connect(g);
+      g.connect(out);
+      osc.start(t0);
+      osc.stop(t0 + decay + 0.1);
+    }
+  }
+  /** 부드럽게 부풀었다 가라앉는 화음 (현악 같은 바탕) */
+  pad(semis: number[], o: { vol?: number; delay?: number; attack?: number; hold?: number; release?: number } = {}) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t0 = ctx.currentTime + (o.delay ?? 0);
+    const att = o.attack ?? 1.6,
+      hold = o.hold ?? 2,
+      rel = o.release ?? 3;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(500, t0);
+    lp.frequency.linearRampToValueAtTime(1900, t0 + att);
+    lp.frequency.linearRampToValueAtTime(700, t0 + att + hold + rel);
+    lp.Q.value = 0.4;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0, t0);
+    out.gain.linearRampToValueAtTime(o.vol ?? 0.09, t0 + att);
+    out.gain.setValueAtTime(o.vol ?? 0.09, t0 + att + hold);
+    out.gain.linearRampToValueAtTime(0, t0 + att + hold + rel);
+    lp.connect(out);
+    out.connect(this.buses.music);
+    for (const semi of semis) {
+      for (const det of [-6, 5]) {
+        const osc = ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.value = Audio.note(semi);
+        osc.detune.value = det;
+        const g = ctx.createGain();
+        g.gain.value = 0.16 / semis.length;
+        osc.connect(g);
+        g.connect(lp);
+        osc.start(t0);
+        osc.stop(t0 + att + hold + rel + 0.1);
+      }
+    }
+  }
+
   /** 이름 붙은 루프. 같은 id가 이미 있으면 볼륨만 조정 */
   loop(id: string, name: SoundName, vol = 1, fade = 1, bus: 'sfx' | 'amb' | 'music' = 'amb', rate = 1): LoopHandle | null {
     const ctx = this.ctx;

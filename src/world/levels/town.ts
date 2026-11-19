@@ -237,7 +237,7 @@ function* escape(g: GameAPI): Co {
   let t = 0;
   let missed = false;
   let hand: [number, number] = [bx + 200, -300];
-  const ctl: BlankCtl = { bx, by: -20, lean: 0.3, crouch: 0, head: 0.1, hand: null, grip: 0.2 };
+  const ctl: BlankCtl = { bx, by: -20, lean: 0.3, crouch: 0, head: 0.1, hand: null };
   S.blankCtl = ctl;
   audio.muffle(0.55, 0.3);
   let cock: [number, number] = [0, 0];
@@ -262,25 +262,22 @@ function* escape(g: GameAPI): Co {
     const sh: [number, number] = [ctl.bx + 134 * Math.sin(ctl.lean), ctl.by - 180.6 - 134 * Math.cos(ctl.lean)];
     let target: [number, number];
     if (t < 0.22) {
-      // 예비 동작: 손을 허리 뒤로 끌어당기며 손가락을 벌린다
+      // 예비 동작: 손을 허리 뒤로 끌어당긴다
       const u = ease.inOutSine(clamp(t / 0.22));
       cock = [sh[0] + lerp(90, -20, u), sh[1] + lerp(60, 95, u)];
       target = cock;
-      ctl.grip = lerp(0.2, 0, u);
     } else if (t < T_MISS) {
-      // 손가락을 활짝 편 채, 뛰어오른 몸을 향해 곧장 내지른다 (점점 빨라진다)
+      // 뛰어오른 몸을 향해 손을 곧장 내지른다 (점점 빨라진다)
       // 노리는 곳은 몸이 '조금 전에' 있던 자리 — 몸은 이미 앞으로 빠져나가고 있다
       const u = ease.inQuad(clamp((t - 0.22) / (T_MISS - 0.22)));
       const aim: [number, number] = [b.x - 58, b.y - 74];
       target = [lerp(cock[0], aim[0], u), lerp(cock[1], aim[1], u)];
       miss = target;
-      ctl.grip = 0;
     } else {
-      // 등 바로 뒤에서 손가락이 허공을 움켜쥐고, 주먹이 움찔 당겨진다 (몸은 그 앞으로 떨어져 간다)
+      // 등 바로 뒤에서 허공을 움켜쥐고, 손이 움찔 당겨진다 (몸은 그 앞으로 떨어져 간다)
       const f = ease.outCubic(clamp((t - T_MISS) / 0.3));
       const hang = ease.inOutSine(clamp((t - 0.85) / 0.45));
       target = [miss[0] - 14 * f - 6 * hang, miss[1] + 22 * f + 14 * hang];
-      ctl.grip = ease.outCubic(clamp((t - T_MISS) / 0.07));
     }
     const follow = t < 0.08 ? 20 : 60;
     hand = [lerp(hand[0], target[0], 1 - Math.exp(-dt * follow)), lerp(hand[1], target[1], 1 - Math.exp(-dt * follow))];
@@ -319,8 +316,6 @@ function* escape(g: GameAPI): Co {
     const reach: [number, number] = [EDGE + 70 + Math.sin(t * 2.2) * 25, 60 + Math.sin(t * 1.3) * 10];
     hand = [lerp(hand[0], reach[0], 1 - Math.exp(-dt * 3)), lerp(hand[1], reach[1], 1 - Math.exp(-dt * 3))];
     ctl.hand = hand;
-    // 움켜쥔 주먹을 천천히 풀며, 떨어지는 몸을 향해 다시 손을 뻗는다
-    ctl.grip = lerp(ctl.grip ?? 1, 0.3, 1 - Math.exp(-dt * (t > 0.4 ? 1.6 : 0)));
     if (Math.random() < dt * 10) S.parts.paper(EDGE - 20 + Math.random() * 30, -10 - Math.random() * 60, 1, 0.8);
     cam.y = Math.min(Math.max(-250, b.y - 280), 160);
     if (b.y > 380) S.cineFade = Math.min(1, S.cineFade + dt / 1.0);

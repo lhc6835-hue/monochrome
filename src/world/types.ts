@@ -246,8 +246,6 @@ export interface BlankCtl {
   glowColor?: string;
   /** 인물들 뒤에 그린다 (주인공이 여백 앞에 서 있을 때) */
   behind?: boolean;
-  /** 앞쪽 손에 손가락을 그린다: 0 = 활짝 편 손 ~ 1 = 움켜쥔 주먹 (없으면 둥근 손끝) */
-  grip?: number;
 }
 export interface CamFocus {
   x: number;
